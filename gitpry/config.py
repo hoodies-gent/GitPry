@@ -24,6 +24,8 @@ class LLMConfig:
 @dataclass
 class GitConfig:
     limit: int = 500
+    include_diff: bool = True
+    max_diff_lines: int = 150
 
 @dataclass
 class GitPryConfig:
@@ -57,7 +59,11 @@ def load_config() -> GitPryConfig:
             "temperature": 0.1,
             "timeout": 60.0
         },
-        "git": {"limit": 500}
+        "git": {
+            "limit": 500,
+            "include_diff": True,
+            "max_diff_lines": 150
+        }
     }
 
     # 2. Merge Global Config (lowest file priority)

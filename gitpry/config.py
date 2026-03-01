@@ -13,10 +13,9 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-# TODO(V1.0 - TTFT Optimization): 
-# Local LLMs suffer from severe "Time-To-First-Token" (TTFT) penalties due to Wake-Up 
-# and O(N^2) Attention calculations when ingesting huge token contexts. 
-# Keep `max_tokens` restrained or consider streaming architectures to mitigate perceived latency.
+# TODO(V1.0 - Cloud Fallback):
+# Add support for cloud LLM providers (OpenAI, Anthropic) as a fallback when
+# Ollama is not available. Controlled via `provider` field and corresponding API key env vars.
 @dataclass
 class LLMConfig:
     provider: str = "ollama"
@@ -26,11 +25,9 @@ class LLMConfig:
     timeout: float = 60.0
     max_tokens: int = 6000
 
-# TODO(V1.0 - Smart Retrieval): 
-# The current architecture relies on "Dumb Retrieval" (Stateless Dump), fetching N commits 
-# blindly regardless of the user's targeted query. This wastes tokens and drastically slows down 
-# the TTFT. A future RAG (Retrieval-Augmented Generation) layer or Agentic Tooling should pre-filter 
-# commits based on query relevance before sending to the LLM.
+# TODO(V0.3 - Branch Awareness - P1):
+# `limit` currently only applies to HEAD. Future: add `branch: str = "HEAD"` to
+# allow `git pry index --branch feature/foo` and cross-branch querying.
 @dataclass
 class GitConfig:
     limit: int = 500

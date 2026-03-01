@@ -26,6 +26,8 @@ COMMIT_SCHEMA = pa.schema([
     pa.field("chunk_text", pa.string()),         # The text content that was embedded
     pa.field("chunk_type", pa.string()),         # "header" | "diff"
     pa.field("vector", pa.list_(pa.float32())), # The embedding vector
+    # TODO(V0.3 - P1 Branch Awareness): Add pa.field("branch", pa.list_(pa.string()))
+    # to tag each chunk with which branches it belongs to, enabling cross-branch queries.
 ])
 
 TABLE_NAME = "commits"
@@ -73,7 +75,11 @@ def open_or_create_table(db, vector_dim: int):
         pa.field("chunk_type", pa.string()),
         pa.field("vector", pa.list_(pa.float32(), vector_dim)),
     ])
-    return db.create_table(TABLE_NAME, schema=schema)
+    table = db.create_table(TABLE_NAME, schema=schema)
+    # TODO(V0.3 - Performance): After inserting chunks, call table.create_index()
+    # to build an ANN (Approximate Nearest Neighbor) index for faster vector search
+    # on repos with > 5000 chunks.
+    return table
 
 
 def get_indexed_hashes(table) -> set:

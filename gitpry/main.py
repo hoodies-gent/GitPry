@@ -53,6 +53,9 @@ def ask(
         repo_stats_block = format_repo_stats_block(stats)
 
     # ── Determine retrieval strategy ───────────────────────────────────────
+    # TODO(V0.3 - P2 Query Routing): Insert a heuristic query classifier here to detect
+    # structured queries (e.g. "last 5 commits", "by author X", "yesterday") and route
+    # them to a direct git scan with filters, bypassing the vector search entirely.
     repo_id = get_repo_id(".")
     db_path = get_db_path(repo_id)
     db = lancedb.connect(str(db_path))

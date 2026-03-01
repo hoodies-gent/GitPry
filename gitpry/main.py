@@ -95,7 +95,7 @@ def ask(
         # ── LEGACY FALLBACK PATH ──────────────────────────────────────────
         from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
 
-        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — No local index found. Run `git pry index` for faster, smarter retrieval.\n")
+        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — Analyzing last {limit} commits directly.\n[dim]💡 Tip: Run [bold]git pry index[/bold] once to enable fast semantic search across full history.[/dim]\n")
 
         with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
             commits = get_recent_commits(limit=limit)

@@ -85,15 +85,31 @@ def ask(
         # Error is already logged by the llm client
         raise typer.Exit(code=1)
         
-    # 3. Stream Response
+    # 3. Stream Response with Cold Start Polish
     response_text = ""
-    # We use rich Live to render Markdown dynamically as it streams in!
-    with Live(Markdown(response_text), console=console, refresh_per_second=10) as live:
+    first_chunk_received = False
+    
+    # Start a persistent spinner to mask the LLM 'Wake Up' and Attention latency (TTFT)
+    with console.status("[bold magenta]Awakening LLM and processing context...", spinner="bouncingBar"):
         for chunk in generator:
-            response_text += chunk
-            live.update(Markdown(response_text))
-            
-    console.print()  # Add a trailing newline when done
+            if not first_chunk_received:
+                first_chunk_received = True
+                # The LLM has finally responded! Break out of the spinner context 
+                # so we can transition to the Markdown streaming view.
+                response_text += chunk
+                break
+                
+    if first_chunk_received:
+        # We use rich Live to render Markdown dynamically as the REST of the chunks stream in
+        with Live(Markdown(response_text), console=console, refresh_per_second=10) as live:
+            for chunk in generator:
+                response_text += chunk
+                live.update(Markdown(response_text))
+                
+        console.print()  # Add a trailing newline when done
+    else:
+        # Failsafe if generator yielded nothing
+        console.print("[red]The LLM returned an empty response.[/red]")
 
 def cli():
     app()

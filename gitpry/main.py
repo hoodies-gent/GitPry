@@ -38,6 +38,7 @@ def ask(
     from gitpry.llm.client import stream_ollama
     from gitpry.llm.prompts import SYSTEM_PROMPT, build_user_prompt
     from gitpry.rag.vector_store import get_repo_id, get_db_path, TABLE_NAME, search_similar
+    from gitpry.git_utils.repository import get_repo_stats, format_repo_stats_block
     from rich.console import Console
     from rich.live import Live
     from rich.markdown import Markdown
@@ -45,6 +46,11 @@ def ask(
     from pathlib import Path
 
     console = Console()
+
+    # ── Always collect repo stats first (ground truth for aggregate queries) ─
+    with console.status("[dim]Gathering repository stats...[/dim]", spinner="dots"):
+        stats = get_repo_stats(".")
+        repo_stats_block = format_repo_stats_block(stats)
 
     # ── Determine retrieval strategy ───────────────────────────────────────
     repo_id = get_repo_id(".")
@@ -124,8 +130,9 @@ def ask(
         console.print(msg + "...\n")
 
     # ── Build and stream the prompt ────────────────────────────────────────
-    prompt = build_user_prompt(context_str, question)
+    prompt = build_user_prompt(context_str, question, repo_stats_block=repo_stats_block)
     logger.debug(f"Sending prompt to LLM...")
+
 
     generator = stream_ollama(prompt=prompt, system=SYSTEM_PROMPT)
 

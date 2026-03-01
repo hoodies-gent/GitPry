@@ -20,6 +20,7 @@ class LLMConfig:
     base_url: str = "http://localhost:11434"
     temperature: float = 0.1
     timeout: float = 60.0
+    max_tokens: int = 6000
 
 @dataclass
 class GitConfig:
@@ -57,7 +58,8 @@ def load_config() -> GitPryConfig:
             "model": "qwen2.5-coder:7b", 
             "base_url": "http://localhost:11434",
             "temperature": 0.1,
-            "timeout": 60.0
+            "timeout": 60.0,
+            "max_tokens": 6000
         },
         "git": {
             "limit": 500,

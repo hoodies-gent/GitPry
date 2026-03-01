@@ -23,9 +23,10 @@ if __name__ == "__main__":
             print(f"  {idx + 1}. {c['hash']}: {c['message'][:30]}...")
             
         print("\n--- Test 3: Prompt Text Assembly ---")
-        context_str = build_prompt_context(commits)
+        context_str, count = build_prompt_context(commits, max_tokens=6000)
         print("Generated Context String:")
-        print(context_str)
+        print(context_str[:500] + "\n... [truncated for output viewing]")
+        print(f"\nIncluded {count} commits due to truncation.")
         print("\n✓ Valid repository processing successful.")
     else:
         print("✗ Failed to extract commits from the current repository.")

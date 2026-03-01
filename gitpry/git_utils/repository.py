@@ -1,8 +1,18 @@
 from typing import List, Dict, Optional
 import git
+import tiktoken
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from gitpry.utils.logger import logger
 from gitpry.config import settings
+
+def count_tokens(text: str) -> int:
+    """Estimate the number of tokens in a string using cl100k_base encoding."""
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        # Fallback estimation if tiktoken fails
+        return len(text) // 4
 
 def get_recent_commits(repo_path: str = ".", limit: int = 500) -> Optional[List[Dict]]:
     """
@@ -55,18 +65,33 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500) -> Optional[List[
     logger.debug(f"Successfully extracted {len(commits)} commits from '{repo_path}'.")
     return commits
 
-def build_prompt_context(commits: List[Dict]) -> str:
+def build_prompt_context(commits: List[Dict], max_tokens: int = None, base_tokens: int = 0) -> tuple[str, int]:
     """
     Convert a list of commit dictionaries into the structured text format, embedding diffs if available.
+    If max_tokens is provided, older commits (at the end of the list) will be truncated
+    to ensure the total prompt size stays safely within the LLM context window limits.
+    Returns the built context string and the number of commits included.
     """
     blocks = []
+    current_tokens = base_tokens
+    
     for c in commits:
         header = f"[{c['hash']}] {c['author']} @ {c['date']}\nMessage: {c['message']}"
         if c.get("diff"):
             diff_block = f"Diff Details:\n```diff\n{c['diff']}\n```"
-            blocks.append(f"{header}\n{diff_block}")
+            block = f"{header}\n{diff_block}"
         else:
-            blocks.append(header)
+            block = header
+            
+        if max_tokens is not None:
+            # +3 for the \n\n---\n\n separator
+            block_tokens = count_tokens(block) + 3
+            if current_tokens + block_tokens > max_tokens:
+                logger.warning(f"⚠ Token limit reached ({current_tokens}/{max_tokens}). Truncated {len(commits) - len(blocks)} older commits to prevent overflow.")
+                break
+            current_tokens += block_tokens
+            
+        blocks.append(block)
             
     # Separate independent commit records with clear demarcations
-    return "\n\n---\n\n".join(blocks)
+    return "\n\n---\n\n".join(blocks), len(blocks)

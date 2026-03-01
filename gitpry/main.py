@@ -29,7 +29,7 @@ def ask(
     """
     Ask questions about your git history.
     """
-    from gitpry.git_utils.repository import get_recent_commits, build_prompt_context
+    from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
     from gitpry.llm.client import stream_ollama
     from gitpry.llm.prompts import SYSTEM_PROMPT, build_user_prompt
     from rich.console import Console
@@ -46,12 +46,38 @@ def ask(
         # Error is already logged by the git utility
         raise typer.Exit(code=1)
         
-    context_str = build_prompt_context(commits)
+    # Calculate base tokens consumed by the skeleton prompt itself
+    base_skeleton = build_user_prompt("", question) + SYSTEM_PROMPT
+    base_tokens = count_tokens(base_skeleton)
+        
+    context_str, included_count = build_prompt_context(
+        commits, 
+        max_tokens=settings.llm.max_tokens, 
+        base_tokens=base_tokens
+    )
+    
+    # 2. Safety Check
+    if included_count == 0:
+        from rich.panel import Panel
+        err_msg = (
+            f"The current `max_tokens` limit (**{settings.llm.max_tokens}**) is too small "
+            f"to fit even a single recent commit alongside its diff patch.\n\n"
+            f"**How to fix this:**\n"
+            f"1. Increase `max_tokens` in your `.gitpry.toml` (e.g., to 6000 or 8000), OR\n"
+            f"2. Disable diff extraction by setting `include_diff = false`."
+        )
+        console.print(Panel(Markdown(err_msg), title="[bold red]Token Limit Overflow", border_style="red"))
+        raise typer.Exit(code=1)
+        
     prompt = build_user_prompt(context_str, question)
     
-    # 2. Query LLM
-    logger.debug("Prompt constructed. Querying local Ollama model...")
-    console.print(f"\n[bold green]GitPry[/] is analyzing your last {len(commits)} commits...\n")
+    # 3. Query LLM
+    logger.debug(f"Prompt constructed ({count_tokens(prompt)} tokens). Querying local Ollama model...")
+    
+    msg = f"\n[bold green]GitPry[/] is analyzing your last {included_count} commits"
+    if included_count < len(commits):
+        msg += f" [yellow](truncated {len(commits) - included_count} to fit {settings.llm.max_tokens} token limit)[/]"
+    console.print(msg + "...\n")
     
     generator = stream_ollama(prompt=prompt, system=SYSTEM_PROMPT)
     

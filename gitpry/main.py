@@ -27,9 +27,45 @@ def ask(
     """
     Ask questions about your git history.
     """
-    # This is a placeholder
-    logger.info("The 'ask' command is not fully implemented yet.")
-    typer.echo(f"Hello from GitPry! You asked: '{question}' with limit {limit}.")
+    from gitpry.git_utils.repository import get_recent_commits, build_prompt_context
+    from gitpry.llm.client import stream_ollama
+    from gitpry.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+    from rich.console import Console
+    from rich.live import Live
+    from rich.markdown import Markdown
+
+    console = Console()
+    
+    # 1. Extract Git History
+    with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
+        commits = get_recent_commits(limit=limit)
+        
+    if not commits:
+        # Error is already logged by the git utility
+        raise typer.Exit(code=1)
+        
+    context_str = build_prompt_context(commits)
+    prompt = build_user_prompt(context_str, question)
+    
+    # 2. Query LLM
+    logger.debug("Prompt constructed. Querying local Ollama model...")
+    console.print(f"\n[bold green]GitPry[/] is analyzing your last {len(commits)} commits...\n")
+    
+    generator = stream_ollama(prompt=prompt, system=SYSTEM_PROMPT)
+    
+    if not generator:
+        # Error is already logged by the llm client
+        raise typer.Exit(code=1)
+        
+    # 3. Stream Response
+    response_text = ""
+    # We use rich Live to render Markdown dynamically as it streams in!
+    with Live(Markdown(response_text), console=console, refresh_per_second=10) as live:
+        for chunk in generator:
+            response_text += chunk
+            live.update(Markdown(response_text))
+            
+    console.print()  # Add a trailing newline when done
 
 def cli():
     app()

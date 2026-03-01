@@ -38,9 +38,17 @@ class GitConfig:
     max_diff_lines: int = 150
 
 @dataclass
+class RagConfig:
+    enabled: bool = True
+    embed_model: str = "nomic-embed-text"
+    max_chunk_tokens: int = 400
+    top_k: int = 5
+
+@dataclass
 class GitPryConfig:
     llm: LLMConfig
     git: GitConfig
+    rag: RagConfig
 
 def _load_toml_dict(filepath: Path) -> dict:
     if not filepath.exists() or not filepath.is_file():
@@ -74,6 +82,12 @@ def load_config() -> GitPryConfig:
             "limit": 500,
             "include_diff": False,
             "max_diff_lines": 150
+        },
+        "rag": {
+            "enabled": True,
+            "embed_model": "nomic-embed-text",
+            "max_chunk_tokens": 400,
+            "top_k": 5,
         }
     }
 
@@ -104,7 +118,8 @@ def load_config() -> GitPryConfig:
     # Build typed dataclasses
     return GitPryConfig(
         llm=LLMConfig(**config_dict["llm"]),
-        git=GitConfig(**config_dict["git"])
+        git=GitConfig(**config_dict["git"]),
+        rag=RagConfig(**config_dict["rag"]),
     )
 
 # Singleton global instance

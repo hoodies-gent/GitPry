@@ -26,3 +26,19 @@ limit = 500
 # Extract inline code diffs for deep context analysis.
 # Warning: Setting this to true will severely impact performance and LLM context limits.
 include_diff = false
+
+[rag]
+# Set to false to permanently disable RAG and always use legacy chronological retrieval.
+# Useful if you prefer not to install nomic-embed-text, or for small repos.
+enabled = true
+
+# The local Ollama model to use for generating embeddings.
+# Requires: ollama pull nomic-embed-text
+embed_model = "nomic-embed-text"
+
+# Maximum number of tokens per diff chunk when indexing.
+# Lower values produce more granular embeddings (better precision, more chunks).
+max_chunk_tokens = 400
+
+# Number of semantically relevant chunks to retrieve during `ask`.
+top_k = 5

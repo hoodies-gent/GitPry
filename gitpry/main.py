@@ -24,92 +24,240 @@ from gitpry.config import settings
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="The natural language question to ask about your git history."),
-    limit: int = typer.Option(settings.git.limit, "--limit", help="Limit the number of commits to analyze.")
+    limit: int = typer.Option(settings.git.limit, "--limit", help="Limit the number of commits to analyze (legacy fallback)."),
+    top_k: int = typer.Option(5, "--top-k", help="Number of semantically similar commits to retrieve from the RAG index."),
+    no_rag: bool = typer.Option(False, "--no-rag", help="Bypass the RAG index and use legacy chronological retrieval."),
 ):
     """
     Ask questions about your git history.
+    
+    If a local RAG index exists (built with `git pry index`), this will perform
+    fast semantic retrieval to find the most relevant commits for your question.
+    Otherwise, it falls back to chronological commit scraping.
     """
-    from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
     from gitpry.llm.client import stream_ollama
     from gitpry.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+    from gitpry.rag.vector_store import get_repo_id, get_db_path, TABLE_NAME, search_similar
     from rich.console import Console
     from rich.live import Live
     from rich.markdown import Markdown
+    import lancedb
+    from pathlib import Path
 
     console = Console()
-    
-    # 1. Extract Git History
-    with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
-        commits = get_recent_commits(limit=limit)
-        
-    if not commits:
-        # Error is already logged by the git utility
-        raise typer.Exit(code=1)
-        
-    # Calculate base tokens consumed by the skeleton prompt itself
-    base_skeleton = build_user_prompt("", question) + SYSTEM_PROMPT
-    base_tokens = count_tokens(base_skeleton)
-        
-    context_str, included_count = build_prompt_context(
-        commits, 
-        max_tokens=settings.llm.max_tokens, 
-        base_tokens=base_tokens
-    )
-    
-    # 2. Safety Check
-    if included_count == 0:
-        from rich.panel import Panel
-        err_msg = (
-            f"The current `max_tokens` limit (**{settings.llm.max_tokens}**) is too small "
-            f"to fit even a single recent commit alongside its diff patch.\n\n"
-            f"**How to fix this:**\n"
-            f"1. Increase `max_tokens` in your `.gitpry.toml` (e.g., to 6000 or 8000), OR\n"
-            f"2. Disable diff extraction by setting `include_diff = false`."
+
+    # ── Determine retrieval strategy ───────────────────────────────────────
+    repo_id = get_repo_id(".")
+    db_path = get_db_path(repo_id)
+    db = lancedb.connect(str(db_path))
+    has_index = not no_rag and settings.rag.enabled and (TABLE_NAME in db.table_names())
+
+    if has_index:
+        # ── RAG PATH ──────────────────────────────────────────────────────
+        from gitpry.rag.embedder import get_embedding
+
+        console.print(f"\n[bold green]GitPry[/] (RAG mode) — Searching semantic index for relevant commits...\n")
+
+        with console.status("[bold blue]Vectorizing query...", spinner="dots"):
+            query_vector = get_embedding(question)
+
+        if not query_vector:
+            console.print("[red]Failed to generate query embedding. Falling back to legacy mode.[/red]\n")
+            has_index = False  # Drop to fallback below
+        else:
+            with console.status("[bold blue]Searching vector store...", spinner="dots"):
+                results = search_similar(".", query_vector, top_k=top_k)
+
+            if not results:
+                console.print("[yellow]No matching commits found in the index. Try running `git pry index` first.[/yellow]")
+                raise typer.Exit(code=1)
+
+            # Build a context string from the Top-K semantic results
+            context_blocks = []
+            for r in results:
+                block = (
+                    f"[{r['commit_hash_short']}] {r['author']} @ {r['date']}\n"
+                    f"Message: {r['message']}\n"
+                    f"Relevant Context:\n{r['chunk_text']}"
+                )
+                context_blocks.append(block)
+
+            context_str = "\n\n---\n\n".join(context_blocks)
+            console.print(f"[dim]Retrieved {len(results)} semantically relevant chunks.[/dim]\n")
+
+    if not has_index:
+        # ── LEGACY FALLBACK PATH ──────────────────────────────────────────
+        from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
+
+        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — No local index found. Run `git pry index` for faster, smarter retrieval.\n")
+
+        with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
+            commits = get_recent_commits(limit=limit)
+
+        if not commits:
+            raise typer.Exit(code=1)
+
+        base_skeleton = build_user_prompt("", question) + SYSTEM_PROMPT
+        base_tokens = count_tokens(base_skeleton)
+
+        context_str, included_count = build_prompt_context(
+            commits,
+            max_tokens=settings.llm.max_tokens,
+            base_tokens=base_tokens
         )
-        console.print(Panel(Markdown(err_msg), title="[bold red]Token Limit Overflow", border_style="red"))
-        raise typer.Exit(code=1)
-        
+
+        if included_count == 0:
+            from rich.panel import Panel
+            err_msg = (
+                f"The current `max_tokens` limit (**{settings.llm.max_tokens}**) is too small "
+                f"to fit even a single recent commit alongside its diff patch.\n\n"
+                f"**How to fix this:**\n"
+                f"1. Increase `max_tokens` in your `.gitpry.toml` (e.g., to 6000 or 8000), OR\n"
+                f"2. Disable diff extraction by setting `include_diff = false`."
+            )
+            console.print(Panel(Markdown(err_msg), title="[bold red]Token Limit Overflow", border_style="red"))
+            raise typer.Exit(code=1)
+
+        msg = f"[bold green]GitPry[/] is analyzing your last {included_count} commits"
+        if included_count < len(commits):
+            msg += f" [yellow](truncated {len(commits) - included_count} to fit {settings.llm.max_tokens} token limit)[/]"
+        console.print(msg + "...\n")
+
+    # ── Build and stream the prompt ────────────────────────────────────────
     prompt = build_user_prompt(context_str, question)
-    
-    # 3. Query LLM
-    logger.debug(f"Prompt constructed ({count_tokens(prompt)} tokens). Querying local Ollama model...")
-    
-    msg = f"\n[bold green]GitPry[/] is analyzing your last {included_count} commits"
-    if included_count < len(commits):
-        msg += f" [yellow](truncated {len(commits) - included_count} to fit {settings.llm.max_tokens} token limit)[/]"
-    console.print(msg + "...\n")
-    
+    logger.debug(f"Sending prompt to LLM...")
+
     generator = stream_ollama(prompt=prompt, system=SYSTEM_PROMPT)
-    
+
     if not generator:
-        # Error is already logged by the llm client
         raise typer.Exit(code=1)
-        
-    # 3. Stream Response with Cold Start Polish
+
+    # Stream response with spinner until first token arrives (TTFT UX)
     response_text = ""
     first_chunk_received = False
-    
-    # Start a persistent spinner to mask the LLM 'Wake Up' and Attention latency (TTFT)
+
     with console.status("[bold magenta]Awakening LLM and processing context...", spinner="bouncingBar"):
         for chunk in generator:
             if not first_chunk_received:
                 first_chunk_received = True
-                # The LLM has finally responded! Break out of the spinner context 
-                # so we can transition to the Markdown streaming view.
                 response_text += chunk
                 break
-                
+
     if first_chunk_received:
-        # We use rich Live to render Markdown dynamically as the REST of the chunks stream in
         with Live(Markdown(response_text), console=console, refresh_per_second=10) as live:
             for chunk in generator:
                 response_text += chunk
                 live.update(Markdown(response_text))
-                
-        console.print()  # Add a trailing newline when done
+        console.print()
     else:
-        # Failsafe if generator yielded nothing
         console.print("[red]The LLM returned an empty response.[/red]")
+
+
+@app.command()
+def index(
+    limit: int = typer.Option(2000, "--limit", help="Max number of commits to index (use 0 for full history)."),
+    include_diffs: bool = typer.Option(True, "--include-diffs/--no-diffs", help="Whether to chunk and embed full diff patches."),
+):
+    """
+    Build (or update) the local semantic index for the current repository.
+    
+    Embeds commit history into a local LanceDB vector store so that
+    `git pry ask` can perform fast semantic retrieval instead of dumb chronological scraping.
+    """
+    import lancedb
+    from gitpry.git_utils.repository import get_recent_commits
+    from gitpry.rag.chunker import commits_to_chunks
+    from gitpry.rag.embedder import get_embedding
+    from gitpry.rag.vector_store import (
+        get_repo_id, get_db_path, open_or_create_table, get_indexed_hashes, upsert_chunks
+    )
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
+    console = Console()
+    console.print("\n[bold blue]GitPry Indexer[/] — Building local semantic index...\n")
+
+    # Step 1: Fetch raw commits (temporarily enable diffs if requested)
+    original_include_diff = settings.git.include_diff
+    settings.git.include_diff = include_diffs
+    
+    fetch_limit = limit if limit > 0 else 10000
+    with console.status("[bold blue]Scanning commit history...", spinner="dots"):
+        commits = get_recent_commits(limit=fetch_limit)
+        # Backfill full_hash from GitPython repo for stable chunk IDs
+        try:
+            import git
+            repo = git.Repo(".")
+            hash_map = {c.hexsha[:8]: c.hexsha for c in repo.iter_commits('HEAD', max_count=fetch_limit)}
+            for c in (commits or []):
+                c["full_hash"] = hash_map.get(c["hash"], c["hash"])
+        except Exception:
+            for c in (commits or []):
+                c["full_hash"] = c["hash"]
+    
+    settings.git.include_diff = original_include_diff  # Restore original setting
+
+    if not commits:
+        console.print("[red]No commits found. Aborting.[/red]")
+        raise typer.Exit(code=1)
+
+    # Step 2: Connect to LanceDB and check existing index for incremental update
+    repo_id = get_repo_id(".")
+    db_path = get_db_path(repo_id)
+    db = lancedb.connect(str(db_path))
+    
+    # We probe the first commit's embedding to learn the vector dimension
+    console.print("[dim]Probing embedding model dimension...[/dim]")
+    probe_embedding = get_embedding("probe")
+    if not probe_embedding:
+        console.print("[red]Failed to connect to Ollama or `nomic-embed-text` model is not available.[/red]")
+        console.print("[yellow]Please run: [bold]ollama pull nomic-embed-text[/bold][/yellow]")
+        raise typer.Exit(code=1)
+
+    vector_dim = len(probe_embedding)
+    table = open_or_create_table(db, vector_dim)
+    already_indexed = get_indexed_hashes(table)
+
+    # Step 3: Filter to only new commits
+    new_commits = [c for c in commits if c["full_hash"] not in already_indexed]
+    if not new_commits:
+        console.print(f"[green]✓ Index is already up to date.[/green] ({len(already_indexed)} commits indexed)")
+        raise typer.Exit()
+
+    console.print(f"[green]Found {len(new_commits)} new commits to index[/green] ({len(already_indexed)} already indexed).\n")
+
+    # Step 4: Chunk the new commits
+    chunks = commits_to_chunks(new_commits)
+    console.print(f"[dim]Generated {len(chunks)} chunks from {len(new_commits)} commits.[/dim]\n")
+
+    # Step 5: Embed each chunk and collect for batch insert
+    embedded_chunks = []
+    failed = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold green]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(f"Embedding {len(chunks)} chunks...", total=len(chunks))
+
+        for chunk in chunks:
+            vector = get_embedding(chunk["chunk_text"])
+            if vector:
+                embedded_chunks.append({**chunk, "vector": vector})
+            else:
+                failed += 1
+            progress.advance(task)
+
+    # Step 6: Persist to LanceDB
+    upsert_chunks(table, embedded_chunks)
+
+    console.print(f"\n[bold green]✓ Indexed {len(embedded_chunks)} chunks successfully![/bold green]")
+    if failed > 0:
+        console.print(f"[yellow]⚠ {failed} chunks failed to embed and were skipped.[/yellow]")
+    console.print(f"[dim]Vector store location: {db_path}[/dim]\n")
 
 def cli():
     app()

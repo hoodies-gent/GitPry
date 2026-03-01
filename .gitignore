@@ -217,4 +217,12 @@ __marimo__/
 # Local environment variables and sensitive API credentials
 .env
 
+# Logs and temp files
+*.log
+logs/
+tmp/
 
+# IDE and OS
+.DS_Store
+.idea/
+.vscode/

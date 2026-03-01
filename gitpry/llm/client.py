@@ -3,27 +3,32 @@ import httpx
 from typing import Iterator, Optional
 from gitpry.utils.logger import logger
 
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
+from gitpry.config import settings
 
-def stream_ollama(prompt: str, system: str, model: str = "qwen2.5-coder:7b") -> Optional[Iterator[str]]:
+def stream_ollama(prompt: str, system: str, model: str = None) -> Optional[Iterator[str]]:
     """
     Sends a prompt to the local Ollama instance and yields response chunks.
     Gracefully degrades if the server is unreachable or the model is missing.
     """
+    target_model = model or settings.llm.model
+    # The client handles appending the routing implementation detail (/api/generate)
+    # The user config only specifies the machine endpoint.
+    api_url = f"{settings.llm.base_url.rstrip('/')}/api/generate"
+    
     payload = {
-        "model": model,
+        "model": target_model,
         "prompt": prompt,
         "system": system,
         "stream": True,
         "options": {
-            "temperature": 0.1,  # Keep reasoning deterministic
+            "temperature": settings.llm.temperature,
         }
     }
 
     try:
         # We use a short connection timeout to fail fast if Ollama isn't running,
-        # but a long read timeout since local models might take time to process the first token.
-        with httpx.stream("POST", OLLAMA_API_URL, json=payload, timeout=httpx.Timeout(10.0, read=60.0)) as response:
+        # but a dynamic configurable read timeout.
+        with httpx.stream("POST", api_url, json=payload, timeout=httpx.Timeout(10.0, read=settings.llm.timeout)) as response:
             if response.status_code == 404:
                 logger.error(f"✗ Model '{model}' not found in local Ollama. Please run: ollama run {model}")
                 return None

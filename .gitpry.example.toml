@@ -1,0 +1,24 @@
+# GitPry Configuration Template
+# Copy this file to '.gitpry.toml' in your project root or '~/.config/gitpry/config.toml' globally.
+
+[llm]
+# The backend provider to use for analysis. Currently supports: "ollama"
+provider = "ollama"
+
+# The specific model to use for analysis.
+# Recommended for code: "qwen2.5-coder:7b", "llama3.1"
+model = "qwen2.5-coder:7b"
+
+# The base URL for the LLM service API.
+base_url = "http://localhost:11434"
+
+# The "creativity" of the model. 0.1 is recommended for strict technical accuracy.
+temperature = 0.1
+
+# Network timeout in seconds for generating the response.
+timeout = 60.0
+
+[git]
+# The maximum number of recent commits to extract and send to the LLM.
+# Warning: Setting this too high may exceed the context window of local models.
+limit = 500

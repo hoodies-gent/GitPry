@@ -226,3 +226,6 @@ tmp/
 .DS_Store
 .idea/
 .vscode/
+
+# Local GitPry config (NEVER COMMIT)
+.gitpry.toml

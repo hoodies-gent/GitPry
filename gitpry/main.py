@@ -19,10 +19,12 @@ def main(
         setup_logger(debug=True)
         logger.debug("Verbose logging enabled.")
 
+from gitpry.config import settings
+
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="The natural language question to ask about your git history."),
-    limit: int = typer.Option(500, "--limit", help="Limit the number of commits to analyze.")
+    limit: int = typer.Option(settings.git.limit, "--limit", help="Limit the number of commits to analyze.")
 ):
     """
     Ask questions about your git history.

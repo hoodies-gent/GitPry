@@ -22,3 +22,7 @@ timeout = 60.0
 # The maximum number of recent commits to extract and send to the LLM.
 # Warning: Setting this too high may exceed the context window of local models.
 limit = 500
+
+# Extract inline code diffs for deep context analysis.
+# Warning: Setting this to true will severely impact performance and LLM context limits.
+include_diff = false

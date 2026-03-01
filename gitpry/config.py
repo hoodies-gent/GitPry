@@ -25,7 +25,7 @@ class LLMConfig:
 @dataclass
 class GitConfig:
     limit: int = 500
-    include_diff: bool = True
+    include_diff: bool = False
     max_diff_lines: int = 150
 
 @dataclass
@@ -63,7 +63,7 @@ def load_config() -> GitPryConfig:
         },
         "git": {
             "limit": 500,
-            "include_diff": True,
+            "include_diff": False,
             "max_diff_lines": 150
         }
     }

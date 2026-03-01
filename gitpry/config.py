@@ -13,10 +13,9 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-# TODO(V1.0 - TTFT Optimization): 
-# Local LLMs suffer from severe "Time-To-First-Token" (TTFT) penalties due to Wake-Up 
-# and O(N^2) Attention calculations when ingesting huge token contexts. 
-# Keep `max_tokens` restrained or consider streaming architectures to mitigate perceived latency.
+# TODO(V1.0 - Cloud Fallback):
+# Add support for cloud LLM providers (OpenAI, Anthropic) as a fallback when
+# Ollama is not available. Controlled via `provider` field and corresponding API key env vars.
 @dataclass
 class LLMConfig:
     provider: str = "ollama"
@@ -26,11 +25,9 @@ class LLMConfig:
     timeout: float = 60.0
     max_tokens: int = 6000
 
-# TODO(V1.0 - Smart Retrieval): 
-# The current architecture relies on "Dumb Retrieval" (Stateless Dump), fetching N commits 
-# blindly regardless of the user's targeted query. This wastes tokens and drastically slows down 
-# the TTFT. A future RAG (Retrieval-Augmented Generation) layer or Agentic Tooling should pre-filter 
-# commits based on query relevance before sending to the LLM.
+# TODO(V0.3 - Branch Awareness - P1):
+# `limit` currently only applies to HEAD. Future: add `branch: str = "HEAD"` to
+# allow `git pry index --branch feature/foo` and cross-branch querying.
 @dataclass
 class GitConfig:
     limit: int = 500
@@ -38,9 +35,17 @@ class GitConfig:
     max_diff_lines: int = 150
 
 @dataclass
+class RagConfig:
+    enabled: bool = True
+    embed_model: str = "nomic-embed-text"
+    max_chunk_tokens: int = 400
+    top_k: int = 5
+
+@dataclass
 class GitPryConfig:
     llm: LLMConfig
     git: GitConfig
+    rag: RagConfig
 
 def _load_toml_dict(filepath: Path) -> dict:
     if not filepath.exists() or not filepath.is_file():
@@ -74,6 +79,12 @@ def load_config() -> GitPryConfig:
             "limit": 500,
             "include_diff": False,
             "max_diff_lines": 150
+        },
+        "rag": {
+            "enabled": True,
+            "embed_model": "nomic-embed-text",
+            "max_chunk_tokens": 400,
+            "top_k": 5,
         }
     }
 
@@ -104,7 +115,8 @@ def load_config() -> GitPryConfig:
     # Build typed dataclasses
     return GitPryConfig(
         llm=LLMConfig(**config_dict["llm"]),
-        git=GitConfig(**config_dict["git"])
+        git=GitConfig(**config_dict["git"]),
+        rag=RagConfig(**config_dict["rag"]),
     )
 
 # Singleton global instance

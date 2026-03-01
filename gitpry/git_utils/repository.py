@@ -14,6 +14,70 @@ def count_tokens(text: str) -> int:
         # Fallback estimation if tiktoken fails
         return len(text) // 4
 
+def get_repo_stats(repo_path: str = ".", scan_limit: int = 10000) -> dict:
+    """
+    Compute aggregate repository statistics for the metadata block.
+    Scans up to scan_limit commits to build ground-truth counters.
+    Returns a dict with total_commits, date_range, authors, current_branch.
+    """
+    try:
+        repo = git.Repo(repo_path)
+    except Exception:
+        return {}
+
+    try:
+        current_branch = repo.active_branch.name
+    except TypeError:
+        current_branch = repo.head.commit.hexsha[:8] + " (detached HEAD)"
+
+    authors: dict[str, int] = {}
+    earliest_date = None
+    latest_date = None
+    total = 0
+
+    for commit in repo.iter_commits('HEAD', max_count=scan_limit):
+        total += 1
+        author = str(commit.author)
+        authors[author] = authors.get(author, 0) + 1
+        dt = commit.committed_datetime
+        if earliest_date is None or dt < earliest_date:
+            earliest_date = dt
+        if latest_date is None or dt > latest_date:
+            latest_date = dt
+
+    sorted_authors = sorted(authors.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "total_commits": total,
+        "current_branch": current_branch,
+        "date_range": (
+            f"{earliest_date.strftime('%Y-%m-%d')} → {latest_date.strftime('%Y-%m-%d')}"
+            if earliest_date and latest_date else "unknown"
+        ),
+        "top_authors": sorted_authors[:5],
+        "total_authors": len(authors),
+    }
+
+def format_repo_stats_block(stats: dict) -> str:
+    """
+    Format repo stats as a compact context block to prepend to every prompt.
+    Gives the LLM ground-truth for aggregate queries.
+    """
+    if not stats:
+        return ""
+
+    authors_str = ", ".join(
+        f"{name} ({count})" for name, count in stats.get("top_authors", [])
+    )
+    return (
+        f"[Repository Overview]\n"
+        f"Current Branch: {stats.get('current_branch', 'unknown')}\n"
+        f"Total Commits (this branch): {stats.get('total_commits', '?')}\n"
+        f"Date Range: {stats.get('date_range', 'unknown')}\n"
+        f"Contributors: {authors_str}\n"
+        f"Total Authors: {stats.get('total_authors', '?')}\n"
+    )
+
 def get_recent_commits(repo_path: str = ".", limit: int = 500) -> Optional[List[Dict]]:
     """
     Extract the most recent commits from the specified repository path.

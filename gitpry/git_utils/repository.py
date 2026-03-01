@@ -93,5 +93,10 @@ def build_prompt_context(commits: List[Dict], max_tokens: int = None, base_token
             
         blocks.append(block)
             
+    # Reverse the blocks array so the LLM reads them in chronological order
+    # (Oldest at the top, Newest (HEAD) at the absolute bottom).
+    # This prevents the LLM from confusing "last commit" in the text with the oldest commit.
+    blocks.reverse()
+    
     # Separate independent commit records with clear demarcations
     return "\n\n---\n\n".join(blocks), len(blocks)

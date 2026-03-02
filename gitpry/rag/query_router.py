@@ -12,7 +12,7 @@ Defaults to "semantic" on error or timeout (safe fallback).
 import httpx
 from typing import Literal
 
-QueryRoute = Literal["structured", "semantic"]
+QueryRoute = Literal["structured", "semantic", "conversational"]
 
 _CLASSIFY_PROMPT = """\
 Classify a git history question as either "structured" or "semantic".
@@ -21,13 +21,14 @@ Rules:
 - structured: LISTS or SHOWS commits by COUNT (show me N, last N), DATE (yesterday, this week), or AUTHOR (by John)
   Examples: "show me the last 5 commits", "last 3", "what changed yesterday", "commits by John",
             "list recent commits", "显示最近5个commit", "昨天改了什么", "最新的3条"
-- semantic: asks WHY/HOW/WHEN something happened, OR asks for TOTALS/COUNTS (how many, total number)
-  Examples: "when did we add the login feature", "why was auth rewritten", "how many commits do we have",
-            "total commits", "who are the contributors"
+- semantic: asks WHY/HOW/WHEN something happened involving specific code or features
+  Examples: "when did we add the login feature", "why was auth rewritten"
+- conversational: asks for TOTALS/COUNTS (how many), or is a conversational greeting/follow-up
+  Examples: "how many commits do we have", "who are the contributors", "hello", "explain that again"
 
-Key rule: "last N commits" = structured. "how many commits" = semantic (answered by statistics).
+Key rule: "last N commits" = structured. "how many commits" = conversational (answered by statistics).
 
-Reply with ONLY one lowercase word — either: structured or semantic
+Reply with ONLY one lowercase word — either: structured, semantic, or conversational
 
 Question: {question}
 Answer:"""
@@ -60,6 +61,8 @@ def classify_query(
         text = response.json().get("response", "").strip().lower()
         if "structured" in text:
             return "structured"
+        if "conversational" in text:
+            return "conversational"
         return "semantic"
     except Exception:
         return "semantic"  # Safe fallback — RAG is always correct-ish

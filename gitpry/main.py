@@ -72,7 +72,18 @@ def ask(
     db = lancedb.connect(str(db_path))
     has_index = not no_rag and settings.rag.enabled and (TABLE_NAME in db.table_names())
 
-    if has_index:
+    context_str = ""
+    run_legacy = False
+
+    if route == "conversational":
+        console.print("\n[dim]Conversational query — bypassing commit retrieval.[/dim]\n")
+    elif route == "structured" and not no_rag:
+        from gitpry.git_utils.scanner import scan_structured
+        console.print("\n[bold green]GitPry[/] (Structured mode) — Scanning commits with filters...\n")
+        with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
+            context_str, filter_desc = scan_structured(question, repo_path=".", branch=branch or "HEAD")
+        console.print(f"[dim]Applied filters: {filter_desc}[/dim]\n")
+    elif has_index:
         # ── RAG PATH ──────────────────────────────────────────────────────
         from gitpry.rag.embedder import get_embedding
 
@@ -83,7 +94,7 @@ def ask(
 
         if not query_vector:
             console.print("[red]Failed to generate query embedding. Falling back to legacy mode.[/red]\n")
-            has_index = False  # Drop to fallback below
+            run_legacy = True  # Drop to fallback below
         else:
             with console.status("[bold blue]Searching vector store...", spinner="dots"):
                 results = search_similar(".", query_vector, top_k=top_k, branch_filter=branch)
@@ -109,8 +120,10 @@ def ask(
             context_str = "\n\n---\n\n".join(context_blocks)
             branch_label = f" (branch: {branch})" if branch else " (all branches)"
             console.print(f"[dim]Retrieved {len(results)} semantically relevant chunks{branch_label}.[/dim]\n")
+    else:
+        run_legacy = True
 
-    if not has_index:
+    if run_legacy:
         # ── LEGACY FALLBACK PATH ──────────────────────────────────────────
         from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
 
@@ -443,7 +456,10 @@ def chat(
         logger.debug(f"Chat turn route: {route}")
 
         context_str = ""
-        if route == "structured" and not no_rag:
+        if route == "conversational":
+            console.print("[dim]Conversational query — bypassing commit retrieval.[/dim]")
+
+        elif route == "structured" and not no_rag:
             with console.status("[dim]Scanning commits with filters...[/dim]", spinner="dots"):
                 context_str, filter_desc = scan_structured(
                     question, repo_path=".", branch=session.branch or "HEAD"

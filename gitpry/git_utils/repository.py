@@ -105,7 +105,8 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500, branch: str = "HE
     
     # Extract commits iteratively to avoid loading massive history into memory at once
     try:
-        for commit in repo.iter_commits(branch, max_count=limit):
+        # Avoid massive, unhelpful diffs by ignoring merge commits (--no-merges)
+        for commit in repo.iter_commits(branch, max_count=limit, no_merges=True):
             commit_data = {
                 "hash": commit.hexsha[:8],
                 "author": str(commit.author),
@@ -122,9 +123,18 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500, branch: str = "HE
                     
                     if diff_text:
                         diff_lines = diff_text.split("\n")
-                        # Truncate to prevent enormous diffs (e.g. package-lock.json) from blowing out token limits
+                        # If the diff exceeds max lines, we truncate it gracefully
                         if len(diff_lines) > settings.git.max_diff_lines:
-                            commit_data["diff"] = "\n".join(diff_lines[:settings.git.max_diff_lines]) + f"\n... [{len(diff_lines) - settings.git.max_diff_lines} lines truncated]"
+                            # Instead of a hard cut which might break 'diff --git' boundaries used by chunker.py,
+                            # we find the last valid file boundary before the limit, or just drop the patch part entirely
+                            # and rely only on the --stat summary.
+                            stat_only = []
+                            for line in diff_lines:
+                                if line.startswith("diff --git"):
+                                    break
+                                stat_only.append(line)
+                            
+                            commit_data["diff"] = "\n".join(stat_only) + f"\n... [{len(diff_lines) - len(stat_only)} lines of patch details omitted due to size limit]"
                         else:
                             commit_data["diff"] = diff_text
                 except Exception as diff_e:

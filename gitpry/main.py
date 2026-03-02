@@ -211,8 +211,8 @@ def index(
     from gitpry.rag.chunker import commits_to_chunks
     from gitpry.rag.embedder import get_embedding
     from gitpry.rag.vector_store import (
-        get_repo_id, get_db_path, open_or_create_table, get_indexed_hashes,
-        upsert_chunks, check_schema_migration, drop_table
+        get_repo_id, get_db_path, open_or_create_table, get_indexed_commits,
+        upsert_chunks, check_schema_migration, drop_table, TABLE_NAME
     )
     from rich.console import Console
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
@@ -284,19 +284,47 @@ def index(
 
     vector_dim = len(probe_embedding)
     table = open_or_create_table(db, vector_dim)
-    already_indexed = get_indexed_hashes(table)  # Global dedup — branch-agnostic
+    already_indexed = get_indexed_commits(table)  # Returns dict: {hash: branch_string}
 
-    # Step 3: Filter to only new commits for this branch
-    new_commits = [c for c in commits if c["full_hash"] not in already_indexed]
-    if not new_commits:
-        console.print(f"[green]✓ Index is already up to date for branch [cyan]{target_branch}[/cyan].[/green] ({len(already_indexed)} commits indexed)")
+    # Step 3: Filter to only new commits OR commits that need a branch update
+    commits_to_index = []
+    hashes_to_delete = []
+    
+    for c in commits:
+        c_hash = c["full_hash"]
+        existing_branch_str = already_indexed.get(c_hash)
+        
+        if existing_branch_str is None:
+            # Entirely new commit
+            commits_to_index.append(c)
+        else:
+            # Commit exists. Check if we need to append the new branch tag.
+            branches = [b.strip() for b in existing_branch_str.split(",")]
+            if target_branch not in branches:
+                branches.append(target_branch)
+                c["branch"] = ",".join(branches)  # Inject the combined branch string for the chunker
+                commits_to_index.append(c)
+                hashes_to_delete.append(c_hash)
+
+    if not commits_to_index:
+        console.print(f"[green]✓ Index is already up to date for branch [cyan]{target_branch}[/cyan].[/green] ({len(already_indexed)} commits total)")
         raise typer.Exit()
+        
+    # LanceDB requires deleting old rows before re-inserting with updated columns
+    if hashes_to_delete:
+        console.print(f"[dim]Updating branch tags for {len(hashes_to_delete)} existing commits...[/dim]")
+        # Escape hashes for the SQL-like WHERE clause
+        hash_list = ", ".join([f"'{h}'" for h in hashes_to_delete])
+        try:
+            table.delete(f"commit_hash IN ({hash_list})")
+        except Exception as e:
+            console.print(f"[red]Failed to drop old chunks for branch update: {e}[/red]")
 
-    console.print(f"[green]Found {len(new_commits)} new commits to index[/green] ({len(already_indexed)} already indexed for [cyan]{target_branch}[/cyan]).\n")
+    console.print(f"[green]Processing {len(commits_to_index)} commits...[/green] ({len(already_indexed)} already indexed for [cyan]{target_branch}[/cyan]).\n")
 
     # Step 4: Chunk the new commits, tagging with target branch
-    chunks = commits_to_chunks(new_commits, branch=target_branch)
-    console.print(f"[dim]Generated {len(chunks)} chunks from {len(new_commits)} commits.[/dim]\n")
+    chunks = commits_to_chunks(commits_to_index, branch=target_branch)
+    console.print(f"[dim]Generated {len(chunks)} chunks from {len(commits_to_index)} commits.[/dim]\n")
 
     # Step 5: Embed each chunk and collect for batch insert
     embedded_chunks = []

@@ -28,7 +28,7 @@ COMMIT_SCHEMA = pa.schema([
     pa.field("message", pa.string()),
     pa.field("chunk_text", pa.string()),         # The text content that was embedded
     pa.field("chunk_type", pa.string()),         # "header" | "diff"
-    pa.field("branch", pa.string()),             # Branch name at index time (V0.3+)
+    pa.field("branch", pa.string()),             # Comma-separated list of branches
     pa.field("vector", pa.list_(pa.float32())), # The embedding vector
 ])
 
@@ -112,25 +112,18 @@ def open_or_create_table(db, vector_dim: int):
     return table
 
 
-def get_indexed_hashes(table) -> set:
+def get_indexed_commits(table) -> dict:
     """
-    Return the set of globally indexed full commit hashes for incremental dedup.
-
-    DESIGN NOTE: Deduplication is always global (cross-branch).
-    If commit X is already indexed under branch 'main', it will NOT be re-indexed
-    when running `git pry index --branch feature/foo`, even if it's reachable from
-    that branch. It keeps its original branch tag ('main').
-    This is intentional — "first indexed branch wins."
-
-    # TODO(V0.4 - Multi-branch tagging): To properly associate one chunk with multiple
-    # branches, we'd need to store `branches: list[str]` and support in-place append.
-    # That requires a delete+reinsert strategy since LanceDB has no native field-level update.
+    Return a dictionary mapping commit hash to its indexed branches.
+    This allows us to detect when a commit is already indexed, but needs 
+    to be updated with a new branch tag.
     """
     try:
-        rows = table.search().select(["commit_hash"]).limit(100_000).to_list()
-        return {row["commit_hash"] for row in rows}
+        # Fetch up to 100k commits to build the deduplication map
+        rows = table.search().select(["commit_hash", "branch"]).limit(100_000).to_list()
+        return {row["commit_hash"]: row["branch"] for row in rows}
     except Exception:
-        return set()
+        return {}
 
 
 def upsert_chunks(table, chunks: List[Dict]):
@@ -152,8 +145,9 @@ def search_similar(
 ) -> List[Dict]:
     """
     Search the vector store for the top-K most semantically similar commit chunks.
-    If branch_filter is set, only return chunks indexed from that branch.
-    Returns a list of result dicts with commit metadata.
+    If branch_filter is set, only return chunks containing that branch tag.
+    Uses an iterative fetch loop to guarantee top_k results even if the target 
+    branch is sparse in the global index.
     """
     repo_id = get_repo_id(repo_path)
     db_path = get_db_path(repo_id)
@@ -165,25 +159,48 @@ def search_similar(
             return []
 
         table = db.open_table(TABLE_NAME)
-        query = (
-            table.search(query_vector)
-            .limit(top_k if not branch_filter else top_k * 3)  # Fetch more when filtering
-            .select(["chunk_id", "commit_hash_short", "author", "date", "message",
-                     "chunk_text", "chunk_type", "branch", "_distance"])
-        )
+        
+        # If no branch filter, just do a straight top_k fetch
+        if not branch_filter:
+            return table.search(query_vector).limit(top_k).select([
+                "chunk_id", "commit_hash_short", "author", "date", "message",
+                "chunk_text", "chunk_type", "branch", "_distance"
+            ]).to_list()
 
-        results = query.to_list()
+        # Iterative fetch loop to guarantee top_k results for sparse branches
+        # LanceDB SDK currently lacks stable SQL WHERE pushdown in some local versions
+        batch_size = max(50, top_k * 5)
+        matched_results = []
+        
+        # LanceDB .search() doesn't have an offset natively in the Python builder,
+        # so we fetch an increasingly larger limit until we hit our quota or exhaust the db.
+        current_limit = batch_size
+        max_limit = 5000 # Safety circuit breaker
+        
+        while len(matched_results) < top_k and current_limit <= max_limit:
+            results = table.search(query_vector).limit(current_limit).select([
+                "chunk_id", "commit_hash_short", "author", "date", "message",
+                "chunk_text", "chunk_type", "branch", "_distance"
+            ]).to_list()
+            
+            # If the DB returned fewer rows than our limit, we reached the end of the DB
+            hit_db_end = len(results) < current_limit
+            
+            # Post-filter by branch. Branch field is a comma-separated string: "main,feature/foo"
+            matched_results = []
+            for r in results:
+                branch_list = [b.strip() for b in r.get("branch", "").split(",")]
+                if branch_filter in branch_list:
+                    matched_results.append(r)
+                    if len(matched_results) >= top_k:
+                        break
+            
+            if hit_db_end:
+                break
+                
+            current_limit += batch_size
 
-        # Post-filter by branch if requested
-        # TODO(V0.4 - Native Branch Filter): LanceDB .where() support for string columns is
-        # version-dependent. Until stable, we over-fetch (top_k * 3) and post-filter in Python.
-        # Limitation: if fewer than top_k chunks exist for the target branch, we silently
-        # return less than top_k. No warning is shown to the user.
-        if branch_filter:
-            results = [r for r in results if r.get("branch") == branch_filter]
-            results = results[:top_k]
-
-        return results
+        return matched_results[:top_k]
     except Exception as e:
         logger.error(f"Vector search failed: {e}")
         return []

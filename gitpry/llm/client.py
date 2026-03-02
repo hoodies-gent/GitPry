@@ -26,9 +26,9 @@ def stream_ollama(prompt: str, system: str, model: str = None) -> Optional[Itera
     }
 
     try:
-        # We use a short connection timeout to fail fast if Ollama isn't running,
-        # but a dynamic configurable read timeout.
-        with httpx.stream("POST", api_url, json=payload, timeout=httpx.Timeout(10.0, read=settings.llm.timeout)) as response:
+        # We use a 30s connection timeout to allow Ollama time to load the model into VRAM (cold start),
+        # and a dynamic configurable read timeout for token generation.
+        with httpx.stream("POST", api_url, json=payload, timeout=httpx.Timeout(30.0, read=settings.llm.timeout)) as response:
             if response.status_code == 404:
                 logger.error(f"✗ Model '{model}' not found in local Ollama. Please run: ollama run {model}")
                 return None
@@ -89,7 +89,7 @@ def stream_ollama_chat(
     try:
         with httpx.stream(
             "POST", api_url, json=payload,
-            timeout=httpx.Timeout(10.0, read=settings.llm.timeout)
+            timeout=httpx.Timeout(30.0, read=settings.llm.timeout)
         ) as response:
             if response.status_code == 404:
                 logger.error(f"✗ Model '{target_model}' not found. Run: ollama pull {target_model}")

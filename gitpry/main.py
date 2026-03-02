@@ -41,11 +41,12 @@ def ask(
     from gitpry.llm.prompts import SYSTEM_PROMPT, build_user_prompt
     from gitpry.rag.vector_store import get_repo_id, get_db_path, TABLE_NAME, search_similar
     from gitpry.git_utils.repository import get_repo_stats, format_repo_stats_block
+    from gitpry.rag.query_router import classify_query
+    from gitpry.git_utils.scanner import scan_structured
     from rich.console import Console
     from rich.live import Live
     from rich.markdown import Markdown
     import lancedb
-    from pathlib import Path
 
     console = Console()
 
@@ -54,10 +55,18 @@ def ask(
         stats = get_repo_stats(".", branch=branch or "HEAD")
         repo_stats_block = format_repo_stats_block(stats)
 
-    # ── Determine retrieval strategy ───────────────────────────────────────
-    # TODO(V0.3 - P2 Query Routing): Insert a heuristic query classifier here to detect
-    # structured queries (e.g. "last 5 commits", "by author X", "yesterday") and route
-    # them to a direct git scan with filters, bypassing the vector search entirely.
+    # ── Step 1: Classify query intent ──────────────────────────────────────
+    # TODO(V0.5): Skip classify_query when --no-rag is set; the result is unused in that path.
+    with console.status("[dim]Classifying query intent...[/dim]", spinner="dots"):
+        route = classify_query(
+            question,
+            base_url=settings.llm.base_url,
+            model=settings.llm.model,
+            timeout=settings.llm.timeout,
+        )
+    logger.debug(f"Query route: {route}")
+
+    # ── Step 2b: Determine RAG vs Legacy ────────────────────────────────────
     repo_id = get_repo_id(".")
     db_path = get_db_path(repo_id)
     db = lancedb.connect(str(db_path))

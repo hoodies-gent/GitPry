@@ -314,6 +314,203 @@ def index(
         console.print(f"[yellow]⚠ {failed} chunks failed to embed and were skipped.[/yellow]")
     console.print(f"[dim]Vector store location: {db_path}[/dim]\n")
 
+
+@app.command()
+def chat(
+    branch: Optional[str] = typer.Option(None, "--branch", help="Restrict chat to commits indexed from this branch."),
+    no_rag: bool = typer.Option(False, "--no-rag", help="Bypass the RAG index and use legacy commits only."),
+    max_turns: int = typer.Option(10, "--max-turns", help="Max conversation turns to keep in memory."),
+):
+    """
+    Start an interactive multi-turn chat session about your git history.
+
+    GitPry maintains conversation context across turns, enabling follow-up
+    questions like "tell me more about that commit" or "who made those changes?".
+    RAG retrieval uses the combined context of recent questions for better results.
+
+    Slash commands: /exit  /clear  /stats  /branch <name>  /mode  /help
+    """
+    from gitpry.llm.client import stream_ollama_chat
+    from gitpry.llm.chat_session import ChatSession
+    from gitpry.llm.prompts import SYSTEM_PROMPT
+    from gitpry.rag.vector_store import get_repo_id, get_db_path, TABLE_NAME, search_similar
+    from gitpry.rag.embedder import get_embedding
+    from gitpry.rag.query_router import classify_query
+    from gitpry.git_utils.scanner import scan_structured
+    from gitpry.git_utils.repository import get_repo_stats, format_repo_stats_block
+    from rich.console import Console
+    from rich.live import Live
+    from rich.markdown import Markdown
+    from rich.prompt import Prompt
+    from rich.rule import Rule
+    import lancedb
+
+    console = Console()
+
+    # ── Session init ──────────────────────────────────────────────────────
+    session = ChatSession(branch=branch, no_rag=no_rag, max_turns=max_turns)
+
+    console.print()
+    console.print(Rule("[bold cyan]GitPry Chat[/bold cyan]", style="cyan"))
+    console.print("Multi-turn git history conversation. Type [bold]/help[/bold] for commands, [bold]/exit[/bold] to quit.")
+    console.print(f"Current model: {settings.llm.model}\n")
+
+    # ── Check index availability ──────────────────────────────────────────
+    repo_id = get_repo_id(".")
+    db_path = get_db_path(repo_id)
+    db = lancedb.connect(str(db_path))
+    has_index = not no_rag and settings.rag.enabled and (TABLE_NAME in db.table_names())
+
+    if not has_index and not no_rag:
+        console.print("[yellow]No local index found — running in Legacy mode.[/yellow]")
+        console.print("[dim]Run [bold]git pry index[/bold] for faster semantic search.[/dim]\n")
+
+    # ── REPL loop ─────────────────────────────────────────────────────────
+    while True:
+        try:
+            branch_tag = f"[dim]({session.branch})[/dim] " if session.branch else ""
+            raw = Prompt.ask(f"\n{branch_tag}[bold cyan]You[/bold cyan]").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Session ended.[/dim]")
+            break
+
+        if not raw:
+            continue
+
+        # ── Slash commands ────────────────────────────────────────────────
+        if raw.startswith("/"):
+            cmd_parts = raw[1:].split(maxsplit=1)
+            cmd = cmd_parts[0].lower()
+            arg = cmd_parts[1] if len(cmd_parts) > 1 else ""
+
+            if cmd == "exit":
+                console.print("[dim]Session ended.[/dim]")
+                break
+            elif cmd == "clear":
+                session.clear()
+                console.print("[green]✓ Conversation history cleared.[/green]")
+            elif cmd == "stats":
+                with console.status("[dim]Fetching stats...[/dim]", spinner="dots"):
+                    stats = get_repo_stats(".", branch=session.branch or "HEAD")
+                    block = format_repo_stats_block(stats)
+                console.print(Markdown(f"```\n{block}\n```"))
+            elif cmd == "branch":
+                if not arg:
+                    console.print(f"[yellow]Current branch filter: {session.branch or '(all)'}[/yellow]")
+                    console.print("[dim]Use [bold]/branch <name>[/bold] to set, [bold]/branch -[/bold] to clear.[/dim]")
+                elif arg == "-":
+                    session.branch = None
+                    session.clear()
+                    console.print("[green]✓ Branch filter cleared — searching all branches. History cleared.[/green]")
+                else:
+                    session.branch = arg
+                    session.clear()
+                    console.print(f"[green]✓ Switched to branch [cyan]{arg}[/cyan]. History cleared.[/green]")
+            elif cmd == "mode":
+                mode_str = "Legacy (--no-rag)" if no_rag else ("RAG + Structured" if has_index else "Legacy (no index)")
+                console.print(f"[dim]Current mode: [bold]{mode_str}[/bold][/dim]")
+            elif cmd == "help":
+                console.print(Markdown(
+                    "| Command | Description |\n"
+                    "|---|---|\n"
+                    "| `/exit` | End the session |\n"
+                    "| `/clear` | Clear conversation history |\n"
+                    "| `/stats` | Show repository statistics |\n"
+                    "| `/branch <name>` | Filter to a specific branch |\n"
+                    "| `/branch -` | Clear branch filter (search all) |\n"
+                    "| `/branch` | Show current branch filter |\n"
+                    "| `/mode` | Show current retrieval mode |\n"
+                    "| `/help` | Show this help |"
+                ))
+            else:
+                console.print(f"[red]Unknown command: /{cmd}[/red]  Type /help for options.")
+            continue
+
+        question = raw
+
+        # ── Gather repo stats on first turn only ──────────────────────────
+        if not session.repo_stats_block:
+            with console.status("[dim]Gathering repository stats...[/dim]", spinner="dots"):
+                stats = get_repo_stats(".", branch=session.branch or "HEAD")
+                session.repo_stats_block = format_repo_stats_block(stats)
+
+        # ── Route + Retrieve ──────────────────────────────────────────────
+        combined_query = session.build_combined_query(question)
+
+        with console.status("[dim]Classifying query...[/dim]", spinner="dots"):
+            route = classify_query(combined_query, base_url=settings.llm.base_url,
+                                   model=settings.llm.model, timeout=settings.llm.timeout)
+        logger.debug(f"Chat turn route: {route}")
+
+        context_str = ""
+        if route == "structured" and not no_rag:
+            with console.status("[dim]Scanning commits with filters...[/dim]", spinner="dots"):
+                context_str, filter_desc = scan_structured(
+                    question, repo_path=".", branch=session.branch or "HEAD"
+                )
+            console.print(f"[dim]Structured scan — {filter_desc}[/dim]")
+
+        elif has_index:
+            with console.status("[dim]Searching semantic index...[/dim]", spinner="dots"):
+                query_vector = get_embedding(combined_query)
+                if query_vector:
+                    results = search_similar(".", query_vector,
+                                             top_k=settings.rag.top_k,
+                                             branch_filter=session.branch)
+                    if results:
+                        context_blocks = [
+                            f"[{r['commit_hash_short']}] {r['author']} @ {r['date']}\n"
+                            f"Message: {r['message']}\nContext:\n{r['chunk_text']}"
+                            for r in results
+                        ]
+                        context_str = "\n\n---\n\n".join(context_blocks)
+                        branch_info = f" (branch: {session.branch})" if session.branch else " (all branches)"
+                        console.print(f"[dim]Retrieved {len(results)} chunks{branch_info}.[/dim]")
+
+        else:
+            # Legacy: simple recent-commit scrape
+            from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
+            from gitpry.llm.prompts import build_user_prompt
+            with console.status("[dim]Reading recent commits...[/dim]", spinner="dots"):
+                commits = get_recent_commits(limit=settings.git.limit, branch=session.branch or "HEAD")
+            if commits:
+                base_tokens = count_tokens(build_user_prompt("", question) + SYSTEM_PROMPT)
+                context_str, _ = build_prompt_context(commits, settings.llm.max_tokens - base_tokens)
+
+        # ── Build messages and stream response ────────────────────────────
+        messages = session.build_messages(context_str, question)
+
+        console.print()
+        generator = stream_ollama_chat(messages)
+        if not generator:
+            console.print("[red]Failed to connect to Ollama.[/red]")
+            continue
+
+        response_text = ""
+        first_received = False
+
+        with console.status("[bold magenta]Thinking...[/bold magenta]", spinner="bouncingBar"):
+            for chunk in generator:
+                if not first_received:
+                    first_received = True
+                    response_text += chunk
+                    break
+
+        if first_received:
+            console.print("[bold green]GitPry:[/bold green]", highlight=False)
+            with Live(Markdown(response_text), console=console, refresh_per_second=10) as live:
+                for chunk in generator:
+                    response_text += chunk
+                    live.update(Markdown(response_text))
+            console.print()
+        else:
+            console.print("[red]Empty response from LLM.[/red]")
+            continue
+
+        # ── Store turn in history ─────────────────────────────────────────
+        session.add_turn(question, context_str, response_text)
+
+
 def cli():
     app()
 

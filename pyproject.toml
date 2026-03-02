@@ -19,6 +19,7 @@ dependencies = [
     "tiktoken>=0.6.0",
     "python-dotenv>=1.0.1",
     "lancedb>=0.21.0",
+    "mcp>=1.2.0",
 ]
 
 [project.scripts]

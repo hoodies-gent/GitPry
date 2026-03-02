@@ -527,6 +527,22 @@ def chat(
         session.add_turn(question, context_str, response_text)
 
 
+@app.command()
+def serve():
+    """
+    Start the GitPry MCP (Model Context Protocol) Server.
+    Provides Git context retrieval tools for advanced AI agents like Cursor or Claude Desktop.
+    Connect via stdio transport.
+    """
+    try:
+        from gitpry.mcp_server import serve_stdio
+        serve_stdio()
+    except ImportError as e:
+        console.print(f"[red]Error starting MCP server: {e}[/red]")
+        console.print("[dim]Did you install the 'mcp' dependency? Run: `pip install mcp`[/dim]")
+        raise typer.Exit(code=1)
+
+
 def cli():
     app()
 

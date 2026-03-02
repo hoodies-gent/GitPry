@@ -1,4 +1,5 @@
 import typer
+from typing import Optional
 from gitpry.utils.logger import logger, setup_logger
 
 app = typer.Typer(help="GitPry: Talk to your Git history. Reclaim the Who, When, and Why behind every line of code.", no_args_is_help=True)
@@ -27,6 +28,7 @@ def ask(
     limit: int = typer.Option(settings.git.limit, "--limit", help="Limit the number of commits to analyze (legacy fallback)."),
     top_k: int = typer.Option(5, "--top-k", help="Number of semantically similar commits to retrieve from the RAG index."),
     no_rag: bool = typer.Option(False, "--no-rag", help="Bypass the RAG index and use legacy chronological retrieval."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Filter RAG results to commits indexed from this branch. Default: search all branches."),
 ):
     """
     Ask questions about your git history.
@@ -49,7 +51,7 @@ def ask(
 
     # ── Always collect repo stats first (ground truth for aggregate queries) ─
     with console.status("[dim]Gathering repository stats...[/dim]", spinner="dots"):
-        stats = get_repo_stats(".")
+        stats = get_repo_stats(".", branch=branch or "HEAD")
         repo_stats_block = format_repo_stats_block(stats)
 
     # ── Determine retrieval strategy ───────────────────────────────────────
@@ -75,10 +77,14 @@ def ask(
             has_index = False  # Drop to fallback below
         else:
             with console.status("[bold blue]Searching vector store...", spinner="dots"):
-                results = search_similar(".", query_vector, top_k=top_k)
+                results = search_similar(".", query_vector, top_k=top_k, branch_filter=branch)
 
             if not results:
-                console.print("[yellow]No matching commits found in the index. Try running `git pry index` first.[/yellow]")
+                if branch:
+                    console.print(f"[yellow]No matching commits found in the index for branch '{branch}'.")
+                    console.print(f"[dim]Run [bold]git pry index --branch {branch}[/bold] to index that branch first.[/dim]")
+                else:
+                    console.print("[yellow]No matching commits found in the index. Try running `git pry index` first.[/yellow]")
                 raise typer.Exit(code=1)
 
             # Build a context string from the Top-K semantic results
@@ -92,16 +98,18 @@ def ask(
                 context_blocks.append(block)
 
             context_str = "\n\n---\n\n".join(context_blocks)
-            console.print(f"[dim]Retrieved {len(results)} semantically relevant chunks.[/dim]\n")
+            branch_label = f" (branch: {branch})" if branch else " (all branches)"
+            console.print(f"[dim]Retrieved {len(results)} semantically relevant chunks{branch_label}.[/dim]\n")
 
     if not has_index:
         # ── LEGACY FALLBACK PATH ──────────────────────────────────────────
         from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
 
-        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — Analyzing last {limit} commits directly.\n[dim]💡 Tip: Run [bold]git pry index[/bold] once to enable fast semantic search across full history.[/dim]\n")
+        branch_display = branch or "HEAD"
+        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — Analyzing last {limit} commits from [cyan]{branch_display}[/cyan].\n[dim]💡 Tip: Run [bold]git pry index[/bold] once to enable fast semantic search across full history.[/dim]\n")
 
         with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
-            commits = get_recent_commits(limit=limit)
+            commits = get_recent_commits(limit=limit, branch=branch_display)
 
         if not commits:
             raise typer.Exit(code=1)
@@ -167,6 +175,8 @@ def ask(
 def index(
     limit: int = typer.Option(2000, "--limit", help="Max number of commits to index (use 0 for full history)."),
     include_diffs: bool = typer.Option(True, "--include-diffs/--no-diffs", help="Whether to chunk and embed full diff patches."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Branch to index. Defaults to the current HEAD branch."),
+    reindex: bool = typer.Option(False, "--reindex", help="Drop and rebuild the entire index from scratch (required after schema upgrades)."),
 ):
     """
     Build (or update) the local semantic index for the current repository.
@@ -175,46 +185,72 @@ def index(
     `git pry ask` can perform fast semantic retrieval instead of dumb chronological scraping.
     """
     import lancedb
-    from gitpry.git_utils.repository import get_recent_commits
+    from gitpry.git_utils.repository import get_recent_commits, get_branch_names
     from gitpry.rag.chunker import commits_to_chunks
     from gitpry.rag.embedder import get_embedding
     from gitpry.rag.vector_store import (
-        get_repo_id, get_db_path, open_or_create_table, get_indexed_hashes, upsert_chunks
+        get_repo_id, get_db_path, open_or_create_table, get_indexed_hashes,
+        upsert_chunks, check_schema_migration, drop_table
     )
     from rich.console import Console
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
     console = Console()
-    console.print("\n[bold blue]GitPry Indexer[/] — Building local semantic index...\n")
+
+    # ── Resolve target branch ─────────────────────────────────────────────
+    # TODO(V0.4 - Branch Validation): Validate that `branch` exists in the repo before
+    # running the full pipeline. Currently a typo in --branch will hit a cryptic git error.
+    import git as _git
+    try:
+        _repo = _git.Repo(".")
+        active_branch = _repo.active_branch.name
+    except Exception:
+        active_branch = "HEAD"
+    target_branch = branch or active_branch
+
+    console.print(f"\n[bold blue]GitPry Indexer[/] — Building local semantic index for branch [cyan]{target_branch}[/cyan]...\n")
 
     # Step 1: Fetch raw commits (temporarily enable diffs if requested)
     original_include_diff = settings.git.include_diff
     settings.git.include_diff = include_diffs
-    
+
     fetch_limit = limit if limit > 0 else 10000
     with console.status("[bold blue]Scanning commit history...", spinner="dots"):
-        commits = get_recent_commits(limit=fetch_limit)
+        commits = get_recent_commits(limit=fetch_limit, branch=target_branch)
         # Backfill full_hash from GitPython repo for stable chunk IDs
         try:
             import git
             repo = git.Repo(".")
-            hash_map = {c.hexsha[:8]: c.hexsha for c in repo.iter_commits('HEAD', max_count=fetch_limit)}
+            hash_map = {c.hexsha[:8]: c.hexsha for c in repo.iter_commits(target_branch, max_count=fetch_limit)}
             for c in (commits or []):
                 c["full_hash"] = hash_map.get(c["hash"], c["hash"])
         except Exception:
             for c in (commits or []):
                 c["full_hash"] = c["hash"]
-    
+
     settings.git.include_diff = original_include_diff  # Restore original setting
 
     if not commits:
         console.print("[red]No commits found. Aborting.[/red]")
         raise typer.Exit(code=1)
 
-    # Step 2: Connect to LanceDB and check existing index for incremental update
+    # Step 2: Connect to LanceDB; detect outdated schema or --reindex
     repo_id = get_repo_id(".")
     db_path = get_db_path(repo_id)
     db = lancedb.connect(str(db_path))
+
+    if reindex:
+        # TODO(V0.4 - Selective Reindex): --reindex currently drops the ENTIRE table,
+        # losing index data for all other branches. Future: support --reindex --branch foo
+        # to drop and rebuild only one branch's chunks without affecting others.
+        console.print("[yellow]--reindex: dropping existing index and rebuilding from scratch...[/yellow]")
+        drop_table(db)
+    elif check_schema_migration(db):
+        console.print(
+            "[bold red]⚠ Index schema is outdated (missing 'branch' column from V0.3).[/bold red]\n"
+            "[yellow]Run: [bold]git pry index --reindex[/bold] to rebuild the index.[/yellow]"
+        )
+        raise typer.Exit(code=1)
     
     # We probe the first commit's embedding to learn the vector dimension
     console.print("[dim]Probing embedding model dimension...[/dim]")
@@ -226,18 +262,18 @@ def index(
 
     vector_dim = len(probe_embedding)
     table = open_or_create_table(db, vector_dim)
-    already_indexed = get_indexed_hashes(table)
+    already_indexed = get_indexed_hashes(table)  # Global dedup — branch-agnostic
 
-    # Step 3: Filter to only new commits
+    # Step 3: Filter to only new commits for this branch
     new_commits = [c for c in commits if c["full_hash"] not in already_indexed]
     if not new_commits:
-        console.print(f"[green]✓ Index is already up to date.[/green] ({len(already_indexed)} commits indexed)")
+        console.print(f"[green]✓ Index is already up to date for branch [cyan]{target_branch}[/cyan].[/green] ({len(already_indexed)} commits indexed)")
         raise typer.Exit()
 
-    console.print(f"[green]Found {len(new_commits)} new commits to index[/green] ({len(already_indexed)} already indexed).\n")
+    console.print(f"[green]Found {len(new_commits)} new commits to index[/green] ({len(already_indexed)} already indexed for [cyan]{target_branch}[/cyan]).\n")
 
-    # Step 4: Chunk the new commits
-    chunks = commits_to_chunks(new_commits)
+    # Step 4: Chunk the new commits, tagging with target branch
+    chunks = commits_to_chunks(new_commits, branch=target_branch)
     console.print(f"[dim]Generated {len(chunks)} chunks from {len(new_commits)} commits.[/dim]\n")
 
     # Step 5: Embed each chunk and collect for batch insert

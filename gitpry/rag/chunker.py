@@ -65,7 +65,7 @@ def _chunk_diff(diff_text: str) -> List[str]:
     return result_chunks
 
 
-def commits_to_chunks(commits: List[Dict]) -> List[Dict]:
+def commits_to_chunks(commits: List[Dict], branch: str = "HEAD") -> List[Dict]:
     """
     Convert a list of commit dicts into a list of embeddable chunk dicts.
     Each returned chunk dict has:
@@ -77,6 +77,7 @@ def commits_to_chunks(commits: List[Dict]) -> List[Dict]:
       - message:           Commit message
       - chunk_text:        The actual text to embed
       - chunk_type:        "header" or "diff"
+      - branch:            Branch name used when this chunk was indexed
     """
     all_chunks = []
 
@@ -100,6 +101,7 @@ def commits_to_chunks(commits: List[Dict]) -> List[Dict]:
             "message": commit["message"],
             "chunk_text": header_text,
             "chunk_type": "header",
+            "branch": branch,
         })
 
         # --- Diff Chunks (only if diff data is present) ---
@@ -119,6 +121,8 @@ def commits_to_chunks(commits: List[Dict]) -> List[Dict]:
                     "message": commit["message"],
                     "chunk_text": diff_text,
                     "chunk_type": "diff",
+                    "branch": branch,
                 })
+
 
     return all_chunks

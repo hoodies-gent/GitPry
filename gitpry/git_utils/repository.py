@@ -14,7 +14,7 @@ def count_tokens(text: str) -> int:
         # Fallback estimation if tiktoken fails
         return len(text) // 4
 
-def get_repo_stats(repo_path: str = ".", scan_limit: int = 10000) -> dict:
+def get_repo_stats(repo_path: str = ".", scan_limit: int = 10000, branch: str = "HEAD") -> dict:
     """
     Compute aggregate repository statistics for the metadata block.
     Scans up to scan_limit commits to build ground-truth counters.
@@ -35,7 +35,7 @@ def get_repo_stats(repo_path: str = ".", scan_limit: int = 10000) -> dict:
     latest_date = None
     total = 0
 
-    for commit in repo.iter_commits('HEAD', max_count=scan_limit):
+    for commit in repo.iter_commits(branch, max_count=scan_limit):
         total += 1
         author = str(commit.author)
         authors[author] = authors.get(author, 0) + 1
@@ -49,7 +49,7 @@ def get_repo_stats(repo_path: str = ".", scan_limit: int = 10000) -> dict:
 
     return {
         "total_commits": total,
-        "current_branch": current_branch,
+        "current_branch": branch if branch != "HEAD" else current_branch,
         "date_range": (
             f"{earliest_date.strftime('%Y-%m-%d')} → {latest_date.strftime('%Y-%m-%d')}"
             if earliest_date and latest_date else "unknown"
@@ -78,7 +78,16 @@ def format_repo_stats_block(stats: dict) -> str:
         f"Total Authors: {stats.get('total_authors', '?')}\n"
     )
 
-def get_recent_commits(repo_path: str = ".", limit: int = 500) -> Optional[List[Dict]]:
+def get_branch_names(repo_path: str = ".") -> list:
+    """Return list of all local branch names in the repository."""
+    try:
+        import git
+        repo = git.Repo(repo_path)
+        return [b.name for b in repo.branches]
+    except Exception:
+        return []
+
+def get_recent_commits(repo_path: str = ".", limit: int = 500, branch: str = "HEAD") -> Optional[List[Dict]]:
     """
     Extract the most recent commits from the specified repository path.
     Defensively checks if the directory is a valid git repository.
@@ -96,7 +105,7 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500) -> Optional[List[
     
     # Extract commits iteratively to avoid loading massive history into memory at once
     try:
-        for commit in repo.iter_commits('HEAD', max_count=limit):
+        for commit in repo.iter_commits(branch, max_count=limit):
             commit_data = {
                 "hash": commit.hexsha[:8],
                 "author": str(commit.author),

@@ -183,3 +183,58 @@ def build_prompt_context(commits: List[Dict], max_tokens: int = None, base_token
     
     # Separate independent commit records with clear demarcations
     return "\n\n---\n\n".join(blocks), len(blocks)
+
+def compare_branches(repo_path: str, base: str, target: str) -> str:
+    """
+    Summarize the intent of a branch or Pull Request by analyzing the unique commits and aggregate file changes 
+    introduced in `target` compared to `base` (e.g., main..feature/auth).
+    """
+    try:
+        repo = git.Repo(repo_path)
+    except Exception as e:
+        logger.error(f"Failed to open repo: {e}")
+        return f"Error: Failed to open repository at {repo_path}"
+
+    try:
+        # Get commits in target but not in base (base..target)
+        # We ignore merges so we only see the actual work commits
+        commits_iter = repo.iter_commits(f"{base}..{target}", no_merges=True)
+        commits = list(commits_iter)
+    except Exception as e:
+        logger.error(f"Failed to extract rev-list {base}..{target}: {e}")
+        return f"Error: Could not compare branches '{base}' and '{target}'. Ensure both refs exist."
+
+    if not commits:
+        return f"No unique work commits found on `{target}` compared to `{base}`. The branch might be empty, fully merged, or behind."
+
+    result_blocks = [f"Branch Comparison: `{target}` vs `{base}`"]
+    result_blocks.append(f"Found {len(commits)} unique commit(s) on `{target}`:\n")
+
+    # Chronological format (oldest first to tell the story correctly)
+    commits.reverse()
+    
+    for c in commits:
+        short_hash = c.hexsha[:8]
+        author = str(c.author)
+        date = c.committed_datetime.strftime("%Y-%m-%d %H:%M")
+        subject = c.message.strip().split("\n")[0]
+        
+        try:
+            stat = repo.git.show(c.hexsha, "--stat", "--format=").strip()
+            stat_lines = stat.split("\n")
+            summary_stat = stat_lines[-1].strip() if stat_lines else ""
+            result_blocks.append(f"- [{short_hash}] {subject}\n    {summary_stat}")
+        except Exception:
+            result_blocks.append(f"- [{short_hash}] {subject}")
+
+    # Fetch the aggregate diff stat for the entire range (merge base to target)
+    try:
+        # Using git diff --stat base...target (three-dot) shows changes since branch diverged
+        aggregate_stat = repo.git.diff(f"{base}...{target}", "--stat").strip()
+        if aggregate_stat:
+            result_blocks.append("\nAggregate File Changes (Overall PR size):")
+            result_blocks.append(f"```text\n{aggregate_stat}\n```")
+    except Exception as e:
+        logger.debug(f"Failed to fetch aggregate stat: {e}")
+
+    return "\n".join(result_blocks)

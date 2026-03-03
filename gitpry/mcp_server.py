@@ -117,6 +117,26 @@ def get_commit_diff(commit_hash: str, repo_path: str = ".") -> str:
     except Exception as e:
         return f"Error extracting diff for commit {commit_hash}: {e}"
 
+@mcp.tool()
+def get_file_blame(filepath: str, start_line: Optional[int] = None, end_line: Optional[int] = None, repo_path: str = ".") -> str:
+    """
+    Surgically inspect a file to understand why specific lines of code were written.
+    Returns the origin commit messages and authors for the given file or line range.
+    Use this when you need to understand the historical context or intent behind a specific code block.
+    """
+    from gitpry.git_utils.blame import get_file_blame as builtin_blame
+    return builtin_blame(repo_path, filepath, start_line, end_line)
+
+@mcp.tool()
+def compare_branches(base: str, target: str, repo_path: str = ".") -> str:
+    """
+    Analyze the divergence between two branches (e.g., 'main' vs 'feature').
+    Returns a structural summary of the unique commits, their intents, and aggregate diff stats introduced in the target branch.
+    Use this to understand the macro-level intent and scope of an entire Pull Request before diving into specific files.
+    """
+    from gitpry.git_utils.repository import compare_branches as builtin_compare
+    return builtin_compare(repo_path, base, target)
+
 def serve_stdio():
     """Start the MCP server using standard input/output transport."""
     mcp.run()

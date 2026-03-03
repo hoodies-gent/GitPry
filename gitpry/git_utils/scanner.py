@@ -27,17 +27,48 @@ def _extract_limit(question: str, default: int = 10) -> int:
     return int(m.group(1)) if m else default
 
 
-def _extract_author(question: str) -> Optional[str]:
-    """Extract author name fragment from 'by <name>' or 'from <name>'.
-
-    # TODO(V0.5 - Author Matching): Only extracts a single-word name.
-    # Multi-word names like "Yifan Ke" are not captured. A better approach:
-    # call `git shortlog --summary` to get all known author names and fuzzy-match.
+def _extract_author(question: str, repo_path: str = ".") -> Optional[str]:
+    """Extract author name by matching the question against known git authors.
+    
+    Queries `git shortlog -s` to get the list of exact known authors in the repo.
+    This safely handles multi-word names (like "Yifan Ke") and special characters 
+    without relying on fragile regex.
     """
-    m = re.search(r'\b(?:by|from)\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:\s*$|\s+(?:in|on|at|since|commit))', question, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r'\bby\s+(\w+)', question, re.IGNORECASE)
+    try:
+        repo = git.Repo(repo_path)
+        # Get all authors: "   123  Yifan Ke"
+        shortlog = repo.git.shortlog("-s", "HEAD")
+        
+        # Extract just the names
+        authors = []
+        for line in shortlog.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # Split by the first whitespace block after the commit count
+            parts = line.split("\t", 1)
+            if len(parts) == 2:
+                authors.append(parts[1].strip())
+            else:
+                # Fallback if tab parsing fails
+                name = re.sub(r'^\d+\s+', '', line)
+                authors.append(name.strip())
+                
+        # Sort by length descending, so "Yifan Ke" matches before just "Yifan"
+        authors.sort(key=len, reverse=True)
+        
+        q_lower = question.lower()
+        for author in authors:
+            if not author:
+                continue
+            # Look for exact substring match of the author's name in the query
+            if author.lower() in q_lower:
+                return author
+    except Exception as e:
+        logger.debug(f"Failed to extract author via shortlog: {e}")
+        
+    # Fallback to the old basic regex if git fails
+    m = re.search(r'\b(?:by|from)\s+([A-Za-z]+)\b', question, re.IGNORECASE)
     return m.group(1) if m else None
 
 
@@ -99,7 +130,7 @@ def scan_structured(
         return "", "unknown filters"
 
     limit = _extract_limit(question, default=10)
-    author_filter = _extract_author(question)
+    author_filter = _extract_author(question, repo_path)
     since = _extract_since(question)
 
     parts = []

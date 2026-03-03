@@ -105,7 +105,8 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500, branch: str = "HE
     
     # Extract commits iteratively to avoid loading massive history into memory at once
     try:
-        for commit in repo.iter_commits(branch, max_count=limit):
+        # Avoid massive, unhelpful diffs by ignoring merge commits (--no-merges)
+        for commit in repo.iter_commits(branch, max_count=limit, no_merges=True):
             commit_data = {
                 "hash": commit.hexsha[:8],
                 "author": str(commit.author),
@@ -122,9 +123,18 @@ def get_recent_commits(repo_path: str = ".", limit: int = 500, branch: str = "HE
                     
                     if diff_text:
                         diff_lines = diff_text.split("\n")
-                        # Truncate to prevent enormous diffs (e.g. package-lock.json) from blowing out token limits
+                        # If the diff exceeds max lines, we truncate it gracefully
                         if len(diff_lines) > settings.git.max_diff_lines:
-                            commit_data["diff"] = "\n".join(diff_lines[:settings.git.max_diff_lines]) + f"\n... [{len(diff_lines) - settings.git.max_diff_lines} lines truncated]"
+                            # Instead of a hard cut which might break 'diff --git' boundaries used by chunker.py,
+                            # we find the last valid file boundary before the limit, or just drop the patch part entirely
+                            # and rely only on the --stat summary.
+                            stat_only = []
+                            for line in diff_lines:
+                                if line.startswith("diff --git"):
+                                    break
+                                stat_only.append(line)
+                            
+                            commit_data["diff"] = "\n".join(stat_only) + f"\n... [{len(diff_lines) - len(stat_only)} lines of patch details omitted due to size limit]"
                         else:
                             commit_data["diff"] = diff_text
                 except Exception as diff_e:
@@ -173,3 +183,58 @@ def build_prompt_context(commits: List[Dict], max_tokens: int = None, base_token
     
     # Separate independent commit records with clear demarcations
     return "\n\n---\n\n".join(blocks), len(blocks)
+
+def compare_branches(repo_path: str, base: str, target: str) -> str:
+    """
+    Summarize the intent of a branch or Pull Request by analyzing the unique commits and aggregate file changes 
+    introduced in `target` compared to `base` (e.g., main..feature/auth).
+    """
+    try:
+        repo = git.Repo(repo_path)
+    except Exception as e:
+        logger.error(f"Failed to open repo: {e}")
+        return f"Error: Failed to open repository at {repo_path}"
+
+    try:
+        # Get commits in target but not in base (base..target)
+        # We ignore merges so we only see the actual work commits
+        commits_iter = repo.iter_commits(f"{base}..{target}", no_merges=True)
+        commits = list(commits_iter)
+    except Exception as e:
+        logger.error(f"Failed to extract rev-list {base}..{target}: {e}")
+        return f"Error: Could not compare branches '{base}' and '{target}'. Ensure both refs exist."
+
+    if not commits:
+        return f"No unique work commits found on `{target}` compared to `{base}`. The branch might be empty, fully merged, or behind."
+
+    result_blocks = [f"Branch Comparison: `{target}` vs `{base}`"]
+    result_blocks.append(f"Found {len(commits)} unique commit(s) on `{target}`:\n")
+
+    # Chronological format (oldest first to tell the story correctly)
+    commits.reverse()
+    
+    for c in commits:
+        short_hash = c.hexsha[:8]
+        author = str(c.author)
+        date = c.committed_datetime.strftime("%Y-%m-%d %H:%M")
+        subject = c.message.strip().split("\n")[0]
+        
+        try:
+            stat = repo.git.show(c.hexsha, "--stat", "--format=").strip()
+            stat_lines = stat.split("\n")
+            summary_stat = stat_lines[-1].strip() if stat_lines else ""
+            result_blocks.append(f"- [{short_hash}] {subject}\n    {summary_stat}")
+        except Exception:
+            result_blocks.append(f"- [{short_hash}] {subject}")
+
+    # Fetch the aggregate diff stat for the entire range (merge base to target)
+    try:
+        # Using git diff --stat base...target (three-dot) shows changes since branch diverged
+        aggregate_stat = repo.git.diff(f"{base}...{target}", "--stat").strip()
+        if aggregate_stat:
+            result_blocks.append("\nAggregate File Changes (Overall PR size):")
+            result_blocks.append(f"```text\n{aggregate_stat}\n```")
+    except Exception as e:
+        logger.debug(f"Failed to fetch aggregate stat: {e}")
+
+    return "\n".join(result_blocks)

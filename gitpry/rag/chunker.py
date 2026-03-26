@@ -1,6 +1,4 @@
 """
-gitpry/rag/chunker.py
-
 Responsible for converting raw commit dictionaries into embeddable text chunks.
 
 Chunking Strategy:
@@ -25,7 +23,6 @@ def _chunk_diff(diff_text: str) -> List[str]:
     if not diff_text:
         return []
 
-    # Split by file boundary markers
     file_sections = []
     current_section = []
 
@@ -39,14 +36,12 @@ def _chunk_diff(diff_text: str) -> List[str]:
     if current_section:
         file_sections.append("\n".join(current_section))
 
-    # Now re-chunk any section that's still too large by token count
     result_chunks = []
     max_chunk_tokens = _get_max_chunk_tokens()
     for section in file_sections:
         if count_tokens(section) <= max_chunk_tokens:
             result_chunks.append(section)
         else:
-            # Fall back to raw line-by-line chunking
             lines = section.split("\n")
             temp_chunk = []
             temp_tokens = 0

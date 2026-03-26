@@ -1,6 +1,4 @@
 """
-gitpry/rag/query_router.py
-
 Language-agnostic query intent classifier using local Ollama.
 
 Makes a single, minimal LLM call asking for a one-word classification:

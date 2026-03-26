@@ -1,6 +1,4 @@
 """
-gitpry/git_utils/scanner.py
-
 Structured query executor: parses filter intent from the user question
 and runs a filtered git scan directly (no vector search).
 

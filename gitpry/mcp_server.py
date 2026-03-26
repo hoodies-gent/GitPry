@@ -1,6 +1,4 @@
 """
-gitpry/mcp_server.py
-
 Model Context Protocol (MCP) Server for GitPry.
 Exposes core Git history extraction and RAG retrieval capabilities as Tools 
 for external AI Agents (like Claude Desktop, Cursor, or Windsurf).

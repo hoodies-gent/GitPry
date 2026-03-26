@@ -1,6 +1,4 @@
 """
-gitpry/rag/embedder.py
-
 Handles generating text embeddings using Ollama's local embedding endpoint.
 Model: nomic-embed-text (optimized for long-form text retrieval)
 """

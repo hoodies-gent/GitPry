@@ -1,6 +1,4 @@
 """
-gitpry/rag/vector_store.py
-
 Manages the local LanceDB vector database for Git commit embeddings.
 
 The database is stored at: ~/.gitpry/vectors/<repo_id>/

@@ -5,7 +5,7 @@ from gitpry.utils.logger import logger, setup_logger
 app = typer.Typer(
     name="git pry", 
     help="GitPry: Talk to Git History with Natural Language.", 
-    epilog="💡 Tip: You can invoke this tool natively as a Git subcommand ('git pry') or directly as a standalone binary ('git-pry').",
+    epilog="💡 Tip: Both 'git pry' and 'git-pry' execute this tool identically. Use 'git pry' for native feel, or fallback to the standalone 'git-pry' if Git intercepts flags (like '--help' causing 'man' errors).",
     no_args_is_help=True
 )
 

@@ -17,19 +17,12 @@ ollama pull nomic-embed-text
 ollama pull qwen2.5-coder:7b  # Or your preferred chat model
 ```
 
-## Installation & Uninstallation
+## Installation
 
-**Install:**
 ```bash
 git clone https://github.com/hoodies-gent/GitPry.git
 cd GitPry
 pip install -e .
-```
-
-**Uninstall:**
-```bash
-pip uninstall git-pry
-rm -rf ~/.gitpry  # Optional: clear vector database
 ```
 
 ## Usage
@@ -59,6 +52,13 @@ Start the standard I/O server to grant agents (Cursor, Claude Desktop, etc.) acc
 git pry serve
 ```
 *Exposes: `semantic_search`, `git_log_scan`, `get_commit_diff`, `get_file_blame`, `compare_branches`, `get_repo_stats`.*
+
+## Uninstallation
+
+```bash
+pip uninstall git-pry
+rm -rf ~/.gitpry  # Optional: clear vector database
+```
 
 > ### Known Limitations
 > - **Oversized Commits:** Massive file changes (like lockfiles) are automatically truncated to prevent local LLM context overflow.

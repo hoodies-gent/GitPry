@@ -2,7 +2,12 @@ import typer
 from typing import Optional
 from gitpry.utils.logger import logger, setup_logger
 
-app = typer.Typer(help="GitPry: Talk to Git History with Natural Language.", no_args_is_help=True)
+app = typer.Typer(
+    name="git pry", 
+    help="GitPry: Talk to Git History with Natural Language.", 
+    epilog="💡 Tip: You can invoke this tool natively as a Git subcommand ('git pry') or directly as a standalone binary ('git-pry').",
+    no_args_is_help=True
+)
 
 def version_callback(value: bool):
     if value:
@@ -376,7 +381,7 @@ def serve():
 
 
 def cli():
-    app()
+    app(prog_name="git pry")
 
 if __name__ == '__main__':
     cli()

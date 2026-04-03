@@ -2,7 +2,7 @@ import typer
 from typing import Optional
 from gitpry.utils.logger import logger, setup_logger
 
-app = typer.Typer(help="GitPry: Talk to your Git history. Reclaim the Who, When, and Why behind every line of code.", no_args_is_help=True)
+app = typer.Typer(help="GitPry: Talk to Git History with Natural Language.", no_args_is_help=True)
 
 def version_callback(value: bool):
     if value:

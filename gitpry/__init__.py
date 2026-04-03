@@ -1,5 +1,5 @@
 """
-GitPry: Talk to your Git history. Reclaim the Who, When, and Why behind every line of code.
+GitPry: Talk to Git History with Natural Language.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"

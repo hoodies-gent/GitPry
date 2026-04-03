@@ -33,7 +33,7 @@ def ask(
     limit: int = typer.Option(settings.git.limit, "--limit", help="Limit the number of commits to analyze (legacy fallback)."),
     top_k: int = typer.Option(5, "--top-k", help="Number of semantically similar commits to retrieve from the RAG index."),
     no_rag: bool = typer.Option(False, "--no-rag", help="Bypass the RAG index and use legacy chronological retrieval."),
-    branch: Optional[str] = typer.Option(None, "--branch", help="Filter RAG results to commits indexed from this branch. Default: search all branches."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Git branch to query against (applies to both RAG and legacy modes). Default: HEAD."),
 ):
     """
     Ask questions about your git history.

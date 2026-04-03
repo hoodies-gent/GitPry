@@ -34,6 +34,11 @@ rm -rf ~/.gitpry  # Optional: clear vector database
 
 ## Usage
 
+**First, navigate to ANY local Git repository you want to analyze:**
+```bash
+cd /path/to/your/project
+```
+
 ### 1. CLI: Talk to your repo
 ```bash
 # Semantic "Why/How" queries (better w/ RAG)

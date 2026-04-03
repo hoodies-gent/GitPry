@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-pry"
-version = "0.2.0"
-description = "GitPry: Talk to your Git history. Reclaim the Who, When, and Why behind every line of code."
+version = "0.6.0"
+description = "GitPry: Talk to Git History with Natural Language."
 authors = [
     { name = "Yifan Ke" }
 ]

@@ -20,10 +20,10 @@ ollama pull qwen2.5-coder:7b  # Or your preferred chat model
 ## Installation
 
 ```bash
-git clone https://github.com/hoodies-gent/GitPry.git
-cd GitPry
-pip install -e .
+pipx install git+https://github.com/hoodies-gent/GitPry.git
 ```
+
+> Requires **Python 3.10+**. `pipx` handles environment isolation automatically.
 
 ## Usage
 
@@ -56,8 +56,8 @@ gitpry serve
 ## Uninstallation
 
 ```bash
-pip uninstall gitpry
-rm -rf ~/.gitpry  # Optional: clear vector database
+pipx uninstall gitpry
+rm -rf ~/.gitpry  # optional: clear vector database
 ```
 
 > ### Known Limitations

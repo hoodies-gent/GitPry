@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Experimental-yellow.svg" alt="Status" />
-  <img src="https://img.shields.io/badge/Version-0.6.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-0.7.0-blue.svg" alt="Version" />
   <img src="https://img.shields.io/badge/Python-3.10%2B-blueviolet.svg" alt="Python" />
 </p>
 
@@ -35,28 +35,28 @@ cd /path/to/your/project
 ### 1. CLI: Talk to your repo
 ```bash
 # Semantic "Why/How" queries (better w/ RAG)
-git pry ask "Why was the auth module rewritten?"
+gitpry ask "Why was the auth module rewritten?"
 
 # Structured metadata queries
-git pry ask "Show me the last 5 commits by John"
-git pry ask "What changed yesterday?"
+gitpry ask "Show me the last 5 commits by John"
+gitpry ask "What changed yesterday?"
 
 # Aggregate & analytical queries
-git pry ask "How many commits do we have in total?"
+gitpry ask "How many commits do we have in total?"
 ```
-*(Tip: Run `git pry index` first to enable deep semantic search across the entire history. Use `--no-rag` to bypass it anytime).*
+*(Tip: Run `gitpry index` first to enable deep semantic search across the entire history. Use `--no-rag` to bypass it anytime).*
 
 ### 2. MCP Server: AI IDE Integration
 Start the standard I/O server to grant agents (Cursor, Claude Desktop, etc.) access to git history tools:
 ```bash
-git pry serve
+gitpry serve
 ```
 *Exposes: `semantic_search`, `git_log_scan`, `get_commit_diff`, `get_file_blame`, `compare_branches`, `get_repo_stats`.*
 
 ## Uninstallation
 
 ```bash
-pip uninstall git-pry
+pip uninstall gitpry
 rm -rf ~/.gitpry  # Optional: clear vector database
 ```
 

@@ -3,16 +3,16 @@ from typing import Optional
 from gitpry.utils.logger import logger, setup_logger
 
 app = typer.Typer(
-    name="git pry", 
+    name="gitpry", 
     help="GitPry: Talk to Git History with Natural Language.", 
-    epilog="💡 Tip: Both 'git pry' and 'git-pry' execute this tool identically. Use 'git pry' for native feel, or fallback to the standalone 'git-pry' if Git intercepts flags (like '--help' causing 'man' errors).",
+    epilog="💡 Tip: Run 'gitpry <command> --help' to see advanced options for specific commands.",
     no_args_is_help=True
 )
 
 def version_callback(value: bool):
     if value:
         import importlib.metadata
-        version = importlib.metadata.version("git-pry")
+        version = importlib.metadata.version("gitpry")
         typer.echo(f"GitPry CLI Version: {version}")
         raise typer.Exit()
 
@@ -38,7 +38,7 @@ def ask(
     """
     Ask questions about your git history.
     
-    If a local RAG index exists (built with `git pry index`), this will perform
+    If a local RAG index exists (built with `gitpry index`), this will perform
     fast semantic retrieval to find the most relevant commits for your question.
     Otherwise, it falls back to chronological commit scraping.
     """
@@ -106,9 +106,9 @@ def ask(
             if not results:
                 if branch:
                     console.print(f"[yellow]No matching commits found in the index for branch '{branch}'.")
-                    console.print(f"[dim]Run [bold]git pry index --branch {branch}[/bold] to index that branch first.[/dim]")
+                    console.print(f"[dim]Run [bold]gitpry index --branch {branch}[/bold] to index that branch first.[/dim]")
                 else:
-                    console.print("[yellow]No matching commits found in the index. Try running `git pry index` first.[/yellow]")
+                    console.print("[yellow]No matching commits found in the index. Try running `gitpry index` first.[/yellow]")
                 raise typer.Exit(code=1)
 
             # Build a context string from the Top-K semantic results
@@ -132,7 +132,7 @@ def ask(
         from gitpry.git_utils.repository import get_recent_commits, build_prompt_context, count_tokens
 
         branch_display = branch or "HEAD"
-        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — Analyzing last {limit} commits from [cyan]{branch_display}[/cyan].\n[dim]💡 Tip: Run [bold]git pry index[/bold] once to enable fast semantic search across full history.[/dim]\n")
+        console.print(f"\n[bold yellow]GitPry[/] (Legacy mode) — Analyzing last {limit} commits from [cyan]{branch_display}[/cyan].\n[dim]💡 Tip: Run [bold]gitpry index[/bold] once to enable fast semantic search across full history.[/dim]\n")
 
         with console.status("[bold blue]Scanning local Git repository...", spinner="dots"):
             commits = get_recent_commits(limit=limit, branch=branch_display)
@@ -208,7 +208,7 @@ def index(
     Build (or update) the local semantic index for the current repository.
     
     Embeds commit history into a local LanceDB vector store so that
-    `git pry ask` can perform fast semantic retrieval instead of dumb chronological scraping.
+    `gitpry ask` can perform fast semantic retrieval instead of dumb chronological scraping.
     """
     import lancedb
     from gitpry.git_utils.repository import get_recent_commits, get_branch_names
@@ -274,7 +274,7 @@ def index(
     elif check_schema_migration(db):
         console.print(
             "[bold red]⚠ Index schema is outdated (missing 'branch' column from V0.3).[/bold red]\n"
-            "[yellow]Run: [bold]git pry index --reindex[/bold] to rebuild the index.[/yellow]"
+            "[yellow]Run: [bold]gitpry index --reindex[/bold] to rebuild the index.[/yellow]"
         )
         raise typer.Exit(code=1)
     
@@ -380,7 +380,7 @@ def serve():
 
 
 def cli():
-    app(prog_name="git pry")
+    app(prog_name="gitpry")
 
 if __name__ == '__main__':
     cli()

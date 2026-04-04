@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Experimental-yellow.svg" alt="Status" />
-  <img src="https://img.shields.io/badge/Version-0.7.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-0.7.1-blue.svg" alt="Version" />
   <img src="https://img.shields.io/badge/Python-3.10%2B-blueviolet.svg" alt="Python" />
 </p>
 

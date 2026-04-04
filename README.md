@@ -44,7 +44,7 @@ gitpry ask "What changed yesterday?"
 # Aggregate & analytical queries
 gitpry ask "How many commits do we have in total?"
 ```
-*(Tip: Run `gitpry index` first to enable deep semantic search across the entire history. Use `--no-rag` to bypass it anytime).*
+*(Tips: Run `gitpry index` first to enable semantic search; use `--no-rag` to bypass it at any time. For more options, run `gitpry --help` or `gitpry <command> --help`.)*
 
 ### 2. MCP Server: AI IDE Integration
 Start the standard I/O server to grant agents (Cursor, Claude Desktop, etc.) access to git history tools:

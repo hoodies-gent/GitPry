@@ -61,6 +61,9 @@ rm -rf ~/.gitpry  # Optional: clear vector database
 ```
 
 > ### Known Limitations
+> 
+> As an experimental proof-of-concept, GitPry currently operates within the following boundaries:
+> 
 > - **Oversized Commits:** Massive file changes (like lockfiles) are automatically truncated to prevent local LLM context overflow.
 > - **Merge Commits:** These are excluded from RAG indexing to keep semantic search results highly accurate and noise-free.
 > - **Hardware Demand:** Cross-file chronological analysis requires you to select an LLM with a sufficiently large context window.

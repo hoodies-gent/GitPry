@@ -53,6 +53,12 @@ gitpry serve
 ```
 *Exposes: `semantic_search`, `git_log_scan`, `get_commit_diff`, `get_file_blame`, `compare_branches`, `get_repo_stats`.*
 
+## Configuration
+
+GitPry auto-generates `~/.config/gitpry/config.toml` on first run. Edit it to customize the model, timeout, RAG settings, and more.
+
+For all available options, see [`.gitpry.example.toml`](.gitpry.example.toml).
+
 ## Uninstallation
 
 ```bash

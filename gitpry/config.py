@@ -55,6 +55,40 @@ def _load_toml_dict(filepath: Path) -> dict:
         # If the file is malformed, we just ignore it gracefully and use defaults
         return {}
 
+_GLOBAL_CONFIG_TEMPLATE = """\
+# GitPry Global Configuration
+# This file was auto-generated on first run. Edit as needed.
+# For all available options, see: https://github.com/hoodies-gent/GitPry/blob/main/.gitpry.example.toml
+
+[llm]
+# The Ollama model to use for answering questions.
+# Run 'ollama list' to see what models you have available.
+model = "qwen2.5-coder:7b"
+
+# Ollama server address (default: local)
+# base_url = "http://localhost:11434"
+
+[git]
+# Max commits to scan in legacy (non-RAG) mode
+# limit = 500
+
+[rag]
+# Embedding model for semantic indexing (must be pulled via ollama)
+# embed_model = "nomic-embed-text"
+"""
+
+def _ensure_global_config() -> None:
+    """Write a default config to ~/.config/gitpry/config.toml on first run."""
+    global_path = Path.home() / ".config" / "gitpry" / "config.toml"
+    if not global_path.exists():
+        try:
+            global_path.parent.mkdir(parents=True, exist_ok=True)
+            global_path.write_text(_GLOBAL_CONFIG_TEMPLATE, encoding="utf-8")
+            print(f"💡 First run detected! Created default config at: {global_path}")
+            print("   Edit it to change the Ollama model or other settings.\n")
+        except Exception:
+            pass  # Fail silently; defaults will still apply
+
 def load_config() -> GitPryConfig:
     """
     Loads configuration with the following priority (highest to lowest):
@@ -63,6 +97,9 @@ def load_config() -> GitPryConfig:
     3. Global User Config (~/.config/gitpry/config.toml)
     4. Code Defaults
     """
+    # 0. Bootstrap global config on first run
+    _ensure_global_config()
+
     # 1. Start with hardcoded defaults
     config_dict = {
         "llm": {

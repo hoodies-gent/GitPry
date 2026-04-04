@@ -61,7 +61,6 @@ def ask(
         repo_stats_block = format_repo_stats_block(stats)
 
     # ── Step 1: Classify query intent ──────────────────────────────────────
-    # TODO(V0.5): Skip classify_query when --no-rag is set; the result is unused in that path.
     with console.status("[dim]Classifying query intent...[/dim]", spinner="dots"):
         route = classify_query(
             question,
@@ -225,7 +224,7 @@ def index(
     console = Console()
 
     # ── Resolve target branch ─────────────────────────────────────────────
-    # TODO(V0.4 - Branch Validation): Validate that `branch` exists in the repo before
+    # TODO(UX - Branch Validation): Validate that `branch` exists in the repo before
     # running the full pipeline. Currently a typo in --branch will hit a cryptic git error.
     import git as _git
     try:
@@ -267,7 +266,7 @@ def index(
     db = lancedb.connect(str(db_path))
 
     if reindex:
-        # TODO(V0.4 - Selective Reindex): --reindex currently drops the ENTIRE table,
+        # TODO(Feature - Selective Reindex): --reindex currently drops the ENTIRE table,
         # losing index data for all other branches. Future: support --reindex --branch foo
         # to drop and rebuild only one branch's chunks without affecting others.
         console.print("[yellow]--reindex: dropping existing index and rebuilding from scratch...[/yellow]")

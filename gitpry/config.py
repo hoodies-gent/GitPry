@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-# TODO(V1.0 - Cloud Fallback):
+# TODO(Future - Cloud Fallback):
 # Add support for cloud LLM providers (OpenAI, Anthropic) as a fallback when
 # Ollama is not available. Controlled via `provider` field and corresponding API key env vars.
 @dataclass
@@ -25,9 +25,7 @@ class LLMConfig:
     timeout: float = 60.0
     max_tokens: int = 6000
 
-# TODO(V0.3 - Branch Awareness - P1):
-# `limit` currently only applies to HEAD. Future: add `branch: str = "HEAD"` to
-# allow `git pry index --branch feature/foo` and cross-branch querying.
+
 @dataclass
 class GitConfig:
     limit: int = 500

@@ -104,7 +104,7 @@ def open_or_create_table(db, vector_dim: int):
         pa.field("vector", pa.list_(pa.float32(), vector_dim)),
     ])
     table = db.create_table(TABLE_NAME, schema=schema)
-    # TODO(V0.3 - Performance): After inserting chunks, call table.create_index()
+    # TODO(Performance): After inserting chunks, call table.create_index()
     # to build an ANN (Approximate Nearest Neighbor) index for faster vector search
     # on repos with > 5000 chunks.
     return table

@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-blueviolet.svg" alt="Python" />
 </p>
 
-**Talk to Git History with Natural Language.** GitPry is a local-first Python CLI and MCP server that transforms your raw commit history into an interactive, AI-powered knowledge base.
+**Query and explore Git history using natural language.** GitPry is a local-first Python CLI and MCP server that helps you search, analyze, and understand your repository's commits.
 
 ## Prerequisites
 
